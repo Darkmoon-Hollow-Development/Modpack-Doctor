@@ -238,17 +238,17 @@ THEME_CHOICES = ("System", "Light", "Dark")
 
 PALETTES = {
     "light": {
-        "bg": "#f3f4f6", "surface": "#ffffff", "field": "#ffffff", "fg": "#1f2328", "muted": "#5b6472",
-        "border": "#c9ccd2", "trough": "#e3e5e8", "button": "#e5e7eb", "button_active": "#d5d8dd",
-        "accent": "#1d4ed8", "accent_active": "#1e40af", "accent_fg": "#ffffff",
-        "select_bg": "#2563eb", "select_fg": "#ffffff",
+        "page": "#e7eaf0", "bg": "#ffffff", "surface": "#ffffff", "field": "#f1f3f8", "fg": "#1b1f27",
+        "muted": "#586274", "border": "#e1e5ec", "trough": "#e6e8ec", "button": "#eef1f6", "button_active": "#e0e5ee",
+        "accent": "#2563eb", "accent_active": "#1d4ed8", "accent_fg": "#ffffff",
+        "select_bg": "#dbe7ff", "select_fg": "#10203f",
         "error": "#c62828", "warning": "#8a5100", "info": "#1565c0",
     },
     "dark": {
-        "bg": "#1e2227", "surface": "#262b32", "field": "#2b3139", "fg": "#e6e8eb", "muted": "#9aa3af",
-        "border": "#3b424b", "trough": "#3a414a", "button": "#323944", "button_active": "#3d4550",
-        "accent": "#2563eb", "accent_active": "#1d4ed8", "accent_fg": "#ffffff",
-        "select_bg": "#2f5fb3", "select_fg": "#ffffff",
+        "page": "#0f1217", "bg": "#1b1f26", "surface": "#1b1f26", "field": "#252a33", "fg": "#e8eaed",
+        "muted": "#9aa3af", "border": "#2a303a", "trough": "#2e3540", "button": "#262c36", "button_active": "#323946",
+        "accent": "#2f68ee", "accent_active": "#2757d6", "accent_fg": "#ffffff",
+        "select_bg": "#27406f", "select_fg": "#ffffff",
         "error": "#ff7b7b", "warning": "#f0b429", "info": "#6cb2ff",
     },
 }

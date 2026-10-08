@@ -21,6 +21,7 @@ from . import __version__, fixer, net, pipeline, viewmodel as vm
 from .models import LOADERS
 from .rules import load_rules
 from .sources import Options, SourceError
+from .widgets import Card, PillNotebook, RoundButton, TabPill, mix
 
 SEV_TITLES = {"error": "Errors", "warning": "Warnings", "info": "Tips"}
 
@@ -102,8 +103,8 @@ class App(tk.Tk):
         ``autoscan``: analyse the active tab at start-up if it is a local folder (cheap, no network)."""
         super().__init__()
         self.title("Modpack Doctor")
-        self.geometry("1180x800")
-        self.minsize(960, 640)
+        self.geometry("1200x820")
+        self.minsize(960, 720)
         self._set_icon()
 
         self.settings = vm.load_settings()
@@ -146,6 +147,9 @@ class App(tk.Tk):
         self._themed_texts: list = []
         self._combos: list = []
         self._menus: list = []
+        self._cards: list = []  # custom-drawn widgets that re-colour themselves on a theme change
+        self._rbuttons: list = []
+        self._page_frames: list = []
 
         self._build_style()
         self._build_menu()
@@ -182,10 +186,29 @@ class App(tk.Tk):
         super().destroy()
 
     # ------------------------------------------------------------------ styling
+    @staticmethod
+    def _pick_font_family(root) -> Optional[str]:
+        """The platform's modern UI font if it is installed (Segoe UI on Windows, SF on macOS, then common Linux ones)."""
+        have = {f.lower(): f for f in tkfont.families(root)}
+        for name in ("Segoe UI Variable Text", "Segoe UI", "SF Pro Text", ".AppleSystemUIFont", "Helvetica Neue",
+                     "Inter", "Noto Sans", "Cantarell", "Ubuntu", "Open Sans"):
+            if name.lower() in have:
+                return have[name.lower()]
+        return None
+
     def _build_style(self) -> None:
         st = ttk.Style(self)
         st.theme_use("clam")
         base = tkfont.nametofont("TkDefaultFont")
+        fam = self._pick_font_family(self)
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            try:
+                f = tkfont.nametofont(name)
+                if fam:
+                    f.configure(family=fam)
+                f.configure(size=max(10, abs(int(f.cget("size")))) if sys.platform != "darwin" else f.cget("size"))
+            except tk.TclError:
+                pass
         self.f_base = base
         self.f_bold = base.copy()
         self.f_bold.configure(weight="bold")
@@ -193,26 +216,38 @@ class App(tk.Tk):
         self.f_h1.configure(weight="bold", size=base.cget("size") + 3)
         self.f_big = base.copy()
         self.f_big.configure(weight="bold", size=base.cget("size") + 18)
+        self.f_small = base.copy()
+        self.f_small.configure(size=max(8, base.cget("size") - 1))
         self.f_mono = tkfont.nametofont("TkFixedFont").copy()
-        rowh = base.metrics("linespace") + 8
-        st.configure("Treeview", rowheight=rowh)
-        st.configure("Accent.TButton", font=self.f_bold, padding=(14, 5))
-        st.configure("Fix.TButton", padding=(8, 4))
+        rowh = base.metrics("linespace") + 11
+        st.configure("Treeview", rowheight=rowh, borderwidth=0, relief="flat")
+        st.configure("Treeview.Heading", font=self.f_bold, padding=(8, 7), relief="flat", borderwidth=0)
+        st.configure("TButton", padding=(14, 6), relief="flat", borderwidth=1)
+        st.configure("Accent.TButton", font=self.f_bold, padding=(18, 7), relief="flat", borderwidth=1)
+        st.configure("Fix.TButton", padding=(12, 7))
+        st.configure("TMenubutton", padding=(14, 7), relief="flat", borderwidth=1)
+        st.configure("TEntry", padding=(8, 5), relief="flat", borderwidth=1)
+        st.configure("TCombobox", padding=(8, 5), relief="flat", borderwidth=1, arrowsize=14)
+        st.configure("TCheckbutton", padding=(2, 3))
+        st.configure("TNotebook", borderwidth=0, tabmargins=(0, 0, 0, 0))
+        st.configure("TNotebook.Tab", padding=(18, 9), borderwidth=0, font=self.f_base)
+        st.configure("TScrollbar", arrowsize=13, borderwidth=0, relief="flat")
         st.configure("Count.TLabel", font=self.f_bold)
+        st.configure("Section.TLabel", font=self.f_small)
 
     def _apply_theme(self) -> None:
         """(Re)colour every widget from the palette chosen in the Theme selector."""
         p = self.pal = vm.PALETTES[vm.resolve_theme(self.theme_var.get())]
         self.bg = p["bg"]
         st = ttk.Style(self)
-        self.configure(background=p["bg"])
+        self.configure(background=p["page"])
         st.configure(".", background=p["bg"], foreground=p["fg"], bordercolor=p["border"], lightcolor=p["bg"],
                      darkcolor=p["bg"], troughcolor=p["trough"], focuscolor=p["accent"], fieldbackground=p["field"],
                      insertcolor=p["fg"], selectbackground=p["select_bg"], selectforeground=p["select_fg"])
         st.map(".", foreground=[("disabled", p["muted"])])
         st.configure("Muted.TLabel", foreground=p["muted"])
         st.configure("TButton", background=p["button"], foreground=p["fg"], lightcolor=p["button"], darkcolor=p["button"],
-                     bordercolor=p["border"])
+                     bordercolor=p["border"], focusthickness=0)
         st.map("TButton", background=[("disabled", p["bg"]), ("pressed", p["button_active"]), ("active", p["button_active"])],
                foreground=[("disabled", p["muted"])])
         st.configure("Accent.TButton", background=p["accent"], foreground=p["accent_fg"], lightcolor=p["accent"],
@@ -234,21 +269,24 @@ class App(tk.Tk):
                                                                                       ("!selected", p["field"])],
                indicatorforeground=[("selected", p["accent_fg"])])
         st.configure("TNotebook", background=p["bg"], bordercolor=p["border"], lightcolor=p["bg"], darkcolor=p["bg"])
-        st.configure("TNotebook.Tab", background=p["button"], foreground=p["fg"], bordercolor=p["border"],
-                     lightcolor=p["button"], darkcolor=p["button"])
+        st.configure("TNotebook.Tab", background=p["bg"], foreground=p["muted"], bordercolor=p["bg"],
+                     lightcolor=p["bg"], darkcolor=p["bg"])
         st.map("TNotebook.Tab", background=[("selected", p["surface"]), ("active", p["button_active"])],
-               foreground=[("selected", p["fg"])], lightcolor=[("selected", p["surface"])])
+               foreground=[("selected", p["accent"]), ("active", p["fg"])], bordercolor=[("selected", p["border"])],
+               lightcolor=[("selected", p["surface"])], darkcolor=[("selected", p["surface"])])
         st.configure("Treeview", background=p["surface"], fieldbackground=p["surface"], foreground=p["fg"],
-                     bordercolor=p["border"], lightcolor=p["surface"], darkcolor=p["surface"])
+                     bordercolor=p["surface"], lightcolor=p["surface"], darkcolor=p["surface"])
         st.map("Treeview", background=[("selected", p["select_bg"])], foreground=[("selected", p["select_fg"])])
-        st.configure("Treeview.Heading", background=p["button"], foreground=p["fg"], bordercolor=p["border"],
-                     lightcolor=p["button"], darkcolor=p["button"], relief="flat")
+        st.configure("Treeview.Heading", background=p["surface"], foreground=p["muted"], bordercolor=p["border"],
+                     lightcolor=p["surface"], darkcolor=p["surface"], relief="flat")
         st.map("Treeview.Heading", background=[("active", p["button_active"])])
         st.configure("TScrollbar", background=p["button"], troughcolor=p["trough"], bordercolor=p["border"],
                      arrowcolor=p["fg"], lightcolor=p["button"], darkcolor=p["button"])
         st.map("TScrollbar", background=[("active", p["button_active"])])
         st.configure("TLabelframe", background=p["bg"], bordercolor=p["border"], lightcolor=p["bg"], darkcolor=p["bg"])
-        st.configure("TLabelframe.Label", background=p["bg"], foreground=p["fg"])
+        st.configure("TLabelframe.Label", background=p["bg"], foreground=p["muted"])
+        st.configure("Section.TLabel", foreground=p["muted"])
+        st.configure("Card.TFrame", background=p["surface"])
         st.configure("TSeparator", background=p["border"])
         st.configure("TProgressbar", background=p["accent"], troughcolor=p["trough"], bordercolor=p["border"],
                      lightcolor=p["accent"], darkcolor=p["accent"])
@@ -257,7 +295,7 @@ class App(tk.Tk):
         st.map("TMenubutton", background=[("active", p["button_active"]), ("disabled", p["bg"])],
                foreground=[("disabled", p["muted"])])
         st.configure("TPanedwindow", background=p["bg"])
-        st.configure("Sash", background=p["border"], sashthickness=6)
+        st.configure("Sash", background=p["bg"], sashthickness=8, gripcount=0)
 
         # Drop-down lists of comboboxes are plain tk widgets.
         for opt, key in (("background", "field"), ("foreground", "fg"), ("selectBackground", "select_bg"),
@@ -282,6 +320,14 @@ class App(tk.Tk):
             self.count_lbls[sev].configure(fg=p[sev], bg=p["bg"])
         self.gauge.configure(bg=p["bg"])
         self._draw_gauge(self._score_shown)
+        for f in self._page_frames:
+            f.configure(bg=p["page"])
+        self._status_lbl.configure(bg=p["page"], fg=p["muted"])
+        for c in self._cards:
+            c.restyle(p)
+        for b in [x for x in self._rbuttons if x.winfo_exists()]:
+            b.restyle(p)
+        self.notebook.restyle(p)
         for m in self._menus:  # honoured on Linux/macOS; Windows draws its own menu bar
             self._style_menu(m)
         self._render_tabbar()
@@ -355,26 +401,46 @@ class App(tk.Tk):
         self.menu_file = f
         self._menus = [m, f, t, tm, v, th, h] + self._menus  # + the Saved packs menu made above
 
+    def _btn(self, parent, text, command, kind="default", **kw) -> RoundButton:
+        b = RoundButton(parent, self.pal, text, command, kind=kind, font=self.f_bold if kind == "accent" else self.f_base,
+                        **kw)
+        self._rbuttons = [x for x in self._rbuttons if x.winfo_exists()]  # forget destroyed fix buttons
+        self._rbuttons.append(b)
+        return b
+
+    def _card(self, parent, **kw) -> Card:
+        c = Card(parent, self.pal, **kw)
+        self._cards.append(c)
+        return c
+
+    def _page_frame(self, parent) -> tk.Frame:
+        f = tk.Frame(parent, bg=self.pal["page"], bd=0, highlightthickness=0)
+        self._page_frames.append(f)
+        return f
+
     def _build_header(self) -> None:
-        head = ttk.Frame(self, padding=(12, 10, 12, 4))
+        card = self._card(self, fit=True, height=60)
+        card.pack(fill="x", padx=12, pady=(2, 0))
+        head = ttk.Frame(card.body)
         head.pack(fill="x")
         head.columnconfigure(1, weight=1)
-        ttk.Label(head, text="Modpack").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(head, text="Modpack").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.src_entry = ttk.Entry(head, textvariable=self.src_var)
         self.src_entry.bind("<KeyRelease>", lambda e: self._refresh_buttons())  # folder buttons follow what is typed
         self.src_entry.grid(row=0, column=1, sticky="ew")
-        ttk.Button(head, text="Instance folder...", command=self.pick_folder).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(head, text="Pack file...", command=self.pick_file).grid(row=0, column=3, padx=(6, 0))
-        saved_btn = ttk.Menubutton(head, text="Saved packs", direction="below")
-        saved_btn.configure(menu=self._make_saved_menu(saved_btn))
-        saved_btn.grid(row=0, column=4, padx=(6, 0))
-        self.analyze_btn = ttk.Button(head, text="Analyze", style="Accent.TButton", command=self.analyze)
-        self.analyze_btn.grid(row=0, column=5, padx=(12, 0))
-        self.autofix_btn = ttk.Button(head, text="Auto-fix pack", style="Accent.TButton", command=self.auto_fix)
+        self._btn(head, "Instance folder...", self.pick_folder).grid(row=0, column=2, padx=(8, 0))
+        self._btn(head, "Pack file...", self.pick_file).grid(row=0, column=3, padx=(6, 0))
+        self.saved_btn = self._btn(head, "Saved packs", None, arrow=True)
+        saved_menu = self._make_saved_menu(self.saved_btn)
+        self.saved_btn.configure(command=lambda: self._popup_below(saved_menu, self.saved_btn))
+        self.saved_btn.grid(row=0, column=4, padx=(6, 0))
+        self.analyze_btn = self._btn(head, "Analyze", self.analyze, kind="accent", padx=20)
+        self.analyze_btn.grid(row=0, column=5, padx=(14, 0))
+        self.autofix_btn = self._btn(head, "Auto-fix pack", self.auto_fix, kind="accent", padx=20)
         self.autofix_btn.grid(row=0, column=6, padx=(8, 0))
 
-        opt = ttk.LabelFrame(self, text="Options (leave on Auto unless the result looks wrong)", padding=(10, 6))
-        opt.pack(fill="x", padx=12, pady=(4, 6))
+        opt = ttk.Frame(card.body)
+        opt.pack(fill="x", pady=(12, 0))
         r0 = ttk.Frame(opt)
         r0.pack(fill="x")
         ttk.Label(r0, text="Minecraft").pack(side="left")
@@ -394,33 +460,44 @@ class App(tk.Tk):
         self._combos.append(theme_cb)
         ttk.Label(r0, text="Theme").pack(side="right", padx=(0, 6))
         r1 = ttk.Frame(opt)
-        r1.pack(fill="x", pady=(6, 0))
+        r1.pack(fill="x", pady=(8, 0))
         ttk.Label(r1, text="CurseForge API key").pack(side="left")
-        ttk.Entry(r1, textvariable=self.cf_var, show="•", width=26).pack(side="left", padx=(6, 4))
+        ttk.Entry(r1, textvariable=self.cf_var, show="\u2022", width=26).pack(side="left", padx=(6, 4))
         ttk.Label(r1, text="(only for CurseForge packs, not saved)", style="Muted.TLabel").pack(side="left", padx=(0, 14))
         ttk.Label(r1, text="Extra rules file").pack(side="left")
-        ttk.Entry(r1, textvariable=self.rules_var).pack(side="left", fill="x", expand=True, padx=(6, 4))
-        ttk.Button(r1, text="Browse...", command=self.pick_rules).pack(side="left")
+        ttk.Entry(r1, textvariable=self.rules_var).pack(side="left", fill="x", expand=True, padx=(6, 8))
+        self._btn(r1, "Browse...", self.pick_rules, pady=5).pack(side="left")
+
+    def _popup_below(self, menu: tk.Menu, widget) -> None:
+        try:
+            menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height() + 2)
+        finally:
+            menu.grab_release()
 
     # ------------------------------------------------------------------ body
     def _build_body(self) -> None:
-        body = ttk.PanedWindow(self, orient="horizontal")
-        body.pack(fill="both", expand=True, padx=12, pady=(0, 6))
-        self._build_summary(body)
-        right = ttk.Notebook(body)
-        body.add(right, weight=1)
+        body = self._body = self._page_frame(self)
+        body.pack(fill="both", expand=True, padx=12, pady=(0, 0))
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+        left = self._card(body, width=300)
+        left.grid(row=0, column=0, sticky="ns")
+        left.grid_propagate(False)
+        self._build_summary(left.body)
+        main = self._card(body)
+        main.grid(row=0, column=1, sticky="nsew")
+        right = PillNotebook(main.body, self.pal, self.f_base)
+        right.pack(fill="both", expand=True)
         self.notebook = right
         self._build_findings_tab(right)
         self._build_mods_tab(right)
         self._build_details_tab(right)
 
     def _build_summary(self, parent) -> None:
-        box = ttk.Frame(parent, padding=(0, 0, 10, 0), width=270)
-        box.pack_propagate(False)
-        parent.add(box, weight=0)
+        box = parent
         self.gauge = tk.Canvas(box, width=150, height=150, highlightthickness=0, bg=self.bg)
         self.gauge.pack(pady=(2, 0))
-        self.verdict_lbl = ttk.Label(box, text="", wraplength=240, justify="center", font=self.f_bold)
+        self.verdict_lbl = ttk.Label(box, text="", wraplength=230, justify="center", font=self.f_bold)
         self.verdict_lbl.pack(pady=(0, 6))
         counts = ttk.Frame(box)
         counts.pack()
@@ -429,23 +506,24 @@ class App(tk.Tk):
             lbl = tk.Label(counts, text="-", fg=self.pal[sev], bg=self.bg, font=self.f_bold)
             lbl.pack(side="left", padx=7)
             self.count_lbls[sev] = lbl
-        ttk.Separator(box).pack(fill="x", pady=10)
+        ttk.Separator(box).pack(fill="x", pady=8)
         self.facts_frame = ttk.Frame(box)
         self.facts_frame.pack(fill="x")
-        ttk.Separator(box).pack(fill="x", pady=10)
-        self.undo_btn = ttk.Button(box, text="Undo last fix", command=self.undo_last)
+        ttk.Separator(box).pack(fill="x", pady=8)
+        self.undo_btn = self._btn(box, "Undo last fix", self.undo_last)
         self.undo_btn.pack(fill="x")
-        self.export_btn = ttk.Button(box, text="Export report...", command=self.export)
+        self.export_btn = self._btn(box, "Export report...", self.export)
         self.export_btn.pack(fill="x", pady=(6, 0))
-        self.folder_btn = ttk.Button(box, text="Open analysed folder", command=self.open_folder)
-        self.folder_btn.pack(fill="x", pady=(6, 0))
+        ttk.Label(box, text="OPEN FOLDER", style="Section.TLabel").pack(anchor="w", pady=(12, 4))
         row = ttk.Frame(box)
-        row.pack(fill="x", pady=(6, 0))
-        row.columnconfigure((0, 1), weight=1, uniform="fold")
-        self.mods_btn = ttk.Button(row, text="Mods folder", command=lambda: self.open_pack_folder("mods"))
-        self.mods_btn.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-        self.config_btn = ttk.Button(row, text="Config folder", command=lambda: self.open_pack_folder("config"))
-        self.config_btn.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        row.pack(fill="x")
+        row.columnconfigure((0, 1, 2), weight=1, uniform="fold")
+        self.folder_btn = self._btn(row, "Pack", self.open_folder, padx=6)
+        self.folder_btn.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.mods_btn = self._btn(row, "Mods", lambda: self.open_pack_folder("mods"), padx=6)
+        self.mods_btn.grid(row=0, column=1, sticky="ew", padx=3)
+        self.config_btn = self._btn(row, "Config", lambda: self.open_pack_folder("config"), padx=6)
+        self.config_btn.grid(row=0, column=2, sticky="ew", padx=(3, 0))
         self._draw_gauge(None)
 
     def _draw_gauge(self, score: Optional[int]) -> None:
@@ -542,7 +620,7 @@ class App(tk.Tk):
         self.mods_lbl = ttk.Label(bar, text="Double-click a mod to see its findings", style="Muted.TLabel")
         self.mods_lbl.pack(side="right")
         cols = ("name", "mod_id", "version", "loader", "side", "file", "issue")
-        heads = {"name": ("Name", 160), "mod_id": ("Mod id", 140), "version": ("Version", 90), "loader": ("Loader", 60),
+        heads = {"name": ("Name", 160), "mod_id": ("Mod id", 140), "version": ("Version", 90), "loader": ("Loader", 78),
                  "side": ("Side", 50), "file": ("File", 250), "issue": ("Issue", 70)}
         frame = ttk.Frame(tab)
         frame.pack(fill="both", expand=True, pady=(8, 0))
@@ -569,9 +647,11 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
 
     def _build_status(self) -> None:
-        bar = ttk.Frame(self, padding=(12, 2, 12, 8))
-        bar.pack(fill="x", side="bottom")
-        ttk.Label(bar, textvariable=self.status_var, style="Muted.TLabel").pack(side="left", fill="x", expand=True)
+        bar = self._page_frame(self)
+        bar.pack(fill="x", side="bottom", before=self._body, padx=16, pady=(4, 8))  # never squeezed out
+        self._status_lbl = tk.Label(bar, textvariable=self.status_var, bg=self.pal["page"], fg=self.pal["muted"],
+                                    anchor="w", font=self.f_base)
+        self._status_lbl.pack(side="left", fill="x", expand=True)
         self.progress = ttk.Progressbar(bar, mode="determinate", length=200, maximum=100)
         self.progress.pack(side="right")
 
@@ -617,8 +697,8 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ tabs
     def _build_tabbar(self) -> None:
-        self.tabbar = tk.Frame(self, bd=0, highlightthickness=0)
-        self.tabbar.pack(fill="x", padx=12, pady=(8, 0))
+        self.tabbar = self._page_frame(self)
+        self.tabbar.pack(fill="x", padx=14, pady=(10, 6))
 
     def _is_saved(self, tab: Tab) -> bool:
         key = vm.norm_source(tab.source)
@@ -628,37 +708,21 @@ class App(tk.Tk):
         if not hasattr(self, "tabbar"):
             return
         p = self.pal
-        self.tabbar.configure(bg=p["bg"])
+        self.tabbar.configure(bg=p["page"])
         for w in self.tabbar.winfo_children():
             w.destroy()
         for tab in self.tabs:
-            active = tab is self.tab
-            bg = p["surface"] if active else p["button"]
-            fg = p["fg"] if active else p["muted"]
-            outer = tk.Frame(self.tabbar, bg=p["border"], padx=1, pady=1)
-            outer.pack(side="left", padx=(0, 3))
-            inner = tk.Frame(outer, bg=bg)
-            inner.pack()
-            tk.Frame(inner, height=3, bg=p["accent"] if active else bg).pack(fill="x")
-            row = tk.Frame(inner, bg=bg)
-            row.pack()
-            text = ("★ " if self._is_saved(tab) else "") + vm.shorten(tab.title(), 24) \
-                + ("  •" if tab.attention else "")
-            lbl = tk.Label(row, text=text, bg=bg, fg=fg, padx=10, pady=5, cursor="hand2",
-                           font=self.f_bold if active else self.f_base)
-            lbl.pack(side="left")
-            close = tk.Label(row, text="×", bg=bg, fg=p["muted"], padx=7, pady=3, cursor="hand2", font=self.f_h1)
-            close.pack(side="left")
-            for w in (outer, inner, row, lbl):
-                w.bind("<Button-1>", lambda e, t=tab: self.switch_to(t))
-                w.bind(RIGHT_CLICK, lambda e, t=tab: self._tab_context_menu(t, e))
-                w.bind(MIDDLE_CLICK, lambda e, t=tab: self.close_tab(t))
-            close.bind("<Button-1>", lambda e, t=tab: self.close_tab(t))
-            close.bind("<Enter>", lambda e, c=close: c.configure(fg=p["error"]))
-            close.bind("<Leave>", lambda e, c=close: c.configure(fg=p["muted"]))
-        plus = tk.Label(self.tabbar, text="+", bg=p["bg"], fg=p["fg"], padx=10, pady=4, cursor="hand2", font=self.f_h1)
+            text = ("\u2605 " if self._is_saved(tab) else "") + vm.shorten(tab.title(), 24) \
+                + ("  \u2022" if tab.attention else "")
+            pill = TabPill(self.tabbar, p, text, active=tab is self.tab,
+                           font=self.f_bold if tab is self.tab else self.f_base,
+                           on_select=lambda t=tab: self.switch_to(t), on_close=lambda t=tab: self.close_tab(t),
+                           on_menu=(RIGHT_CLICK, lambda e, t=tab: self._tab_context_menu(t, e)),
+                           on_middle=(MIDDLE_CLICK, lambda e, t=tab: self.close_tab(t)))
+            pill.pack(side="left", padx=(0, 4))
+        plus = RoundButton(self.tabbar, p, "+", self.new_tab, kind="ghost", font=self.f_h1, padx=12, pady=2, radius=16,
+                           on_page=True)
         plus.pack(side="left")
-        plus.bind("<Button-1>", lambda e: self.new_tab())
 
     def _tab_context_menu(self, tab: Tab, event) -> None:
         m = tk.Menu(self, tearoff=False)
@@ -1394,8 +1458,7 @@ class App(tk.Tk):
             label = vm.fix_button_label(fx)
             if len(label) > 120:
                 label = label[:117] + "..."
-            ttk.Button(self.fix_frame, text=label, style="Fix.TButton",
-                       command=lambda fx=fx: self._apply([fx])).pack(fill="x", pady=2)
+            self._btn(self.fix_frame, label, lambda fx=fx: self._apply([fx]), pady=8).pack(fill="x", pady=2)
         self._refresh_buttons()
 
     # ------------------------------------------------------------------ mods tab

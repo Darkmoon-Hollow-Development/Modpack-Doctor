@@ -232,7 +232,10 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(str(self.app.pack_text.cget("bg")).lower(), pal["surface"])
             self.assertEqual(str(self.app.welcome_box.cget("bg")).lower(), pal["surface"])
             self.assertEqual(str(self.app.gauge.cget("bg")).lower(), pal["bg"])
-            self.assertEqual(str(self.app.cget("background")).lower(), pal["bg"])
+            self.assertEqual(str(self.app.cget("background")).lower(), pal["page"])
+            self.assertEqual(str(self.app.tabbar.cget("bg")).lower(), pal["page"])
+            self.assertEqual(str(self.app._cards[0].cget("bg")).lower(), pal["page"])
+            self.assertEqual(self.app.analyze_btn.pal, pal)  # custom-drawn buttons follow the theme too
             self.assertEqual(str(self.app.count_lbls["error"].cget("fg")).lower(), pal["error"])
             self.assertEqual(str(self.app.tree.tag_configure("error", "foreground")).lower(), pal["error"])
             self.assertEqual(vm.load_settings()["theme"], choice)
