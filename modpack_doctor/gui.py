@@ -70,6 +70,19 @@ def open_in_file_manager(path: Path) -> None:
         messagebox.showerror("Modpack Doctor", f"Could not open {path}:\n{e}")
 
 
+def reveal_in_file_manager(path: Path) -> None:
+    """Open the folder containing ``path`` with the file selected where the platform supports it."""
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path.parent)])
+    except OSError as e:
+        messagebox.showerror("Modpack Doctor", f"Could not open {path.parent}:\n{e}")
+
+
 RIGHT_CLICK = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
 MIDDLE_CLICK = "<Button-3>" if sys.platform == "darwin" else "<Button-2>"
 
@@ -379,6 +392,7 @@ class App(tk.Tk):
         t.add_command(label="Undo last fix", command=self.undo_last)
         t.add_separator()
         t.add_command(label="Open analysed folder", command=self.open_folder)
+        t.add_command(label="Show ignored warnings again", command=self.show_ignored_again)
         t.add_command(label="Open mods folder", accelerator="Ctrl+M", command=lambda: self.open_pack_folder("mods"))
         t.add_command(label="Open config folder", accelerator="Ctrl+Shift+C",
                       command=lambda: self.open_pack_folder("config"))
@@ -578,7 +592,7 @@ class App(tk.Tk):
         top = ttk.Frame(pane)
         pane.add(top, weight=1)
         cols = ("sev", "cat", "title")
-        self.tree = ttk.Treeview(top, columns=cols, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(top, columns=cols, show="headings", selectmode="browse", height=6)
         for c, text, w, stretch in (("sev", "Severity", 80, False), ("cat", "Category", 190, False), ("title", "What was found", 600, True)):
             self.tree.heading(c, text=text)
             self.tree.column(c, width=w, minwidth=60, stretch=stretch)
@@ -590,11 +604,22 @@ class App(tk.Tk):
 
         bottom = ttk.Frame(pane, padding=(0, 6, 0, 0))
         pane.add(bottom, weight=1)
+        self.dev_frame = ttk.Frame(bottom)  # developer tools for the selected finding (below the fix buttons)
+        self.dev_frame.pack(side="bottom", fill="x", pady=(6, 0))
+        self.dev_frame.columnconfigure((0, 1, 2), weight=1, uniform="dev")
+        self.dev_btns = []
+        for col, (label, cmd) in enumerate((("Show jar in folder", self.reveal_jar),
+                                            ("View metadata files...", self.view_metadata_for_finding),
+                                            ("Copy debug info", self.copy_debug))):
+            b = self._btn(self.dev_frame, label, cmd, padx=8, pady=6)
+            b.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 3, 0 if col == 2 else 3))
+            self.dev_btns.append(b)
+        self._current_finding = None
         self.fix_frame = ttk.Frame(bottom)
         self.fix_frame.pack(side="bottom", fill="x", pady=(6, 0))
         tf = ttk.Frame(bottom)
         tf.pack(side="top", fill="both", expand=True)
-        self.detail = tk.Text(tf, wrap="word", height=6, relief="flat", padx=10, pady=8, state="disabled",
+        self.detail = tk.Text(tf, wrap="word", height=11, relief="flat", padx=10, pady=8, state="disabled",
                               font=self.f_base, highlightthickness=1)
         self._themed_texts.append(self.detail)
         dsb = ttk.Scrollbar(tf, orient="vertical", command=self.detail.yview)
@@ -1438,6 +1463,9 @@ class App(tk.Tk):
     def _clear_fix_buttons(self) -> None:
         for w in self.fix_frame.winfo_children():
             w.destroy()
+        self._current_finding = None
+        for b in getattr(self, "dev_btns", []):
+            b.state(["disabled"])
 
     def _show_finding(self, f) -> None:
         parts = [(f.title + "\n", "h1"), (f"{vm.SEVERITY_LABEL[f.severity]}", "sev_" + f.severity),
@@ -1447,6 +1475,9 @@ class App(tk.Tk):
         if f.files:
             parts.append(("\nAffected files\n", "h2"))
             parts.append(("\n".join("  " + x for x in f.files[:30]) + (f"\n  ... and {len(f.files) - 30} more" if len(f.files) > 30 else "") + "\n", "mono"))
+        if f.trace:
+            parts.append(("\nWhere this comes from (for developers)\n", "h2"))
+            parts.append(("\n".join("  " + t for t in f.trace[:40]) + "\n", "mono"))
         if f.fixes:
             parts.append(("\nWhat you can do\n", "h2"))
             parts.append(("Use the buttons below. Mods are disabled (renamed), never deleted, and every change can be undone.\n", "muted"))
@@ -1459,6 +1490,11 @@ class App(tk.Tk):
             if len(label) > 120:
                 label = label[:117] + "..."
             self._btn(self.fix_frame, label, lambda fx=fx: self._apply([fx]), pady=8).pack(fill="x", pady=2)
+        self._current_finding = f
+        has_root = self.result is not None and self.result.pack.root is not None
+        self.dev_btns[0].state(["!disabled"] if (f.files and has_root) else ["disabled"])
+        self.dev_btns[1].state(["!disabled"] if (f.files and has_root) else ["disabled"])
+        self.dev_btns[2].state(["!disabled"])
         self._refresh_buttons()
 
     # ------------------------------------------------------------------ mods tab
@@ -1638,6 +1674,153 @@ class App(tk.Tk):
         self.clipboard_clear()
         self.clipboard_append(vm.render_report(self.result, "md"))
         self.status_var.set("Report copied to the clipboard as Markdown.")
+
+    # ------------------------------------------------------------------ developer tools
+    def _choose_file(self, f, then: Callable, widget=None) -> None:
+        """Run ``then(rel)`` for the finding's file; with several files, ask which one in a small menu."""
+        files = list(f.files)
+        if len(files) == 1:
+            then(files[0])
+            return
+        menu = tk.Menu(self, tearoff=False)
+        self._style_menu(menu)
+        for rel in files[:25]:
+            menu.add_command(label=rel, command=lambda r=rel: then(r))
+        if len(files) > 25:
+            menu.add_command(label=f"... and {len(files) - 25} more (see Affected files)", state="disabled")
+        anchor = widget or self
+        try:
+            menu.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def reveal_jar(self) -> None:
+        f, res = self._current_finding, self.result
+        if f is None or res is None or res.pack.root is None or not f.files:
+            return
+
+        def go(rel):
+            p = vm._jar_on_disk(res.pack.root, rel)
+            if p is None:
+                messagebox.showinfo("Modpack Doctor", f"{rel} was not found. It may have been moved, renamed or disabled.")
+            else:
+                reveal_in_file_manager(p)
+        self._choose_file(f, go, self.dev_btns[0])
+
+    def view_metadata_for_finding(self) -> None:
+        f, res = self._current_finding, self.result
+        if f is None or res is None or res.pack.root is None or not f.files:
+            return
+        self._choose_file(f, self.view_metadata, self.dev_btns[1])
+
+    def copy_debug(self) -> None:
+        f, res = self._current_finding, self.result
+        if f is None or res is None:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(vm.debug_info(res, f))
+        self.status_var.set("Debug info for this finding copied. Paste it into a bug report (your home folder name is hidden).")
+
+    def view_metadata(self, rel: str) -> None:
+        """Show the raw metadata files inside a jar, with the line a parse error points at highlighted."""
+        res = self.result
+        if res is None or res.pack.root is None:
+            return
+        root = res.pack.root
+        names = vm.jar_metadata_files(root, rel)
+        if not names:
+            messagebox.showinfo("Modpack Doctor", f"No metadata files could be listed for {rel}.\n"
+                                "The file may be missing or not a valid jar.")
+            return
+        jar = next((j for j in res.jars if j.rel == rel), None)
+        status = {m["file"]: m for m in (jar.meta_files if jar else [])}
+        p = self.pal
+        win = tk.Toplevel(self)
+        win.title(f"Metadata - {rel}")
+        win.geometry("980x600")
+        win.configure(background=p["page"])
+        win.transient(self)
+        head = ttk.Label(win, text=rel, font=self.f_h1)
+        head.pack(anchor="w", padx=16, pady=(14, 2))
+        info = ttk.Label(win, text="", style="Muted.TLabel", wraplength=920, justify="left")
+        info.pack(anchor="w", padx=16, pady=(0, 8))
+        body = ttk.Frame(win)
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+        lb = tk.Listbox(body, width=38, exportselection=False, relief="flat", highlightthickness=1, activestyle="none",
+                        bg=p["field"], fg=p["fg"], selectbackground=p["select_bg"], selectforeground=p["select_fg"],
+                        highlightbackground=p["border"], font=self.f_base)
+        lb.grid(row=0, column=0, sticky="ns", padx=(0, 8))
+        txt = tk.Text(body, wrap="none", relief="flat", highlightthickness=1, font=self.f_mono, bg=p["surface"],
+                      fg=p["fg"], insertbackground=p["fg"], highlightbackground=p["border"],
+                      selectbackground=p["select_bg"], selectforeground=p["select_fg"])
+        txt.grid(row=0, column=1, sticky="nsew")
+        ys = ttk.Scrollbar(body, orient="vertical", command=txt.yview)
+        ys.grid(row=0, column=2, sticky="ns")
+        xs = ttk.Scrollbar(body, orient="horizontal", command=txt.xview)
+        xs.grid(row=1, column=1, sticky="ew")
+        txt.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+        txt.tag_configure("err", background=mix(p["surface"], p["error"], 0.25))
+        txt.tag_configure("num", foreground=p["muted"])
+        for n, size in names:
+            st = status.get(n)
+            mark = "  (FAILED)" if st and not st["ok"] else ""
+            lb.insert("end", f"{n}{mark}")
+        shown = {"text": ""}
+
+        def show(_e=None):
+            sel = lb.curselection()
+            if not sel:
+                return
+            name = names[sel[0]][0]
+            st = status.get(name)
+            if st is None:
+                info.configure(text="Not one of the files the scanner parses for mod info.")
+            elif st["ok"]:
+                info.configure(text=f"Read OK. Mods declared: {', '.join(st['mods']) or 'none'}."
+                                    + (f"\nNote: {st['note']}" if st.get("note") else ""))
+            else:
+                info.configure(text=f"The scanner could not read this file: {st['error']}")
+            try:
+                text = vm.read_jar_text(root, rel, name)
+            except (OSError, KeyError, Exception) as e:  # noqa: BLE001 - any read problem is shown, not raised
+                text = f"(Could not read {name}: {e})"
+            shown["text"] = text
+            txt.configure(state="normal")
+            txt.delete("1.0", "end")
+            bad = vm.error_line(st["error"]) if st and not st["ok"] else None
+            for i, line in enumerate(text.splitlines(), 1):
+                txt.insert("end", f"{i:>4}  ", "num")
+                txt.insert("end", line + "\n", "err" if i == bad else ())
+            txt.configure(state="disabled")
+            if bad:
+                txt.see(f"{bad}.0")
+
+        lb.bind("<<ListboxSelect>>", show)
+        first = next((i for i, (n, _) in enumerate(names) if status.get(n) and not status[n]["ok"]), 0)
+        lb.selection_set(first)
+        show()
+        row = ttk.Frame(win)
+        row.pack(fill="x", padx=16, pady=(0, 14))
+
+        def copy():
+            win.clipboard_clear()
+            win.clipboard_append(shown["text"])
+        self._btn(row, "Copy file text", copy).pack(side="left")
+        self._btn(row, "Close", win.destroy).pack(side="right")
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_ignored_again(self) -> None:
+        res = self.result
+        if res is None or res.pack.root is None or self.busy:
+            return
+        n = fixer.clear_ignored(res.pack.root)
+        if not n:
+            messagebox.showinfo("Modpack Doctor", "You have not ignored anything in this pack.")
+            return
+        self.status_var.set(f"{n} ignored finding(s) will show again.")
+        self.analyze()
 
     def open_pack_folder(self, which: str, tab: Optional[Tab] = None) -> None:
         """Open the pack's ``mods`` / ``config`` / pack folder in Explorer (Finder, file manager)."""

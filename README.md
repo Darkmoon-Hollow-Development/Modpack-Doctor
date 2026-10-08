@@ -63,6 +63,23 @@ modpack-doctor analyze "C:\path\to\instance"
 | Modrinth app | instance > **Open folder** |
 | Server | the folder with `mods` next to `server.properties` |
 
+### Understanding a problem (for pack makers and mod developers)
+
+Click a problem and look at **Where this comes from**. It names the check that raised it, the jar, the metadata file
+inside it, and the exact entry (for example `mods/needs-lib.jar > fabric.mod.json > depends."cool-lib"`). Rule-based findings
+point at the entry in `rules.json`. Three buttons sit under every problem that has files:
+
+- **Show jar in folder** selects the jar in Explorer/Finder.
+- **View metadata files...** opens the raw `fabric.mod.json`, `mods.toml` and friends from inside the jar. A file the scanner
+  could not read is marked, and the line its parser complained about is highlighted.
+- **Copy debug info** puts a JSON bundle on the clipboard (finding, trace, file hashes, which metadata files parsed, tool
+  version; your home folder name is hidden) for pasting into a bug report. Exported Markdown reports include the trace too.
+
+**Metadata problems.** *Part of this jar's mod metadata could not be read* usually means a second loader's file inside the jar is
+slightly malformed while the mod's main metadata is fine. Modpack Doctor never edits files inside mod jars (that could break the
+mod). Instead you can **Ignore this warning** (hides it for this pack; *Undo last fix* or *Tools > Show ignored warnings again*
+brings it back) or **Disable this jar** when nothing in it could be read. Errors can't be ignored.
+
 ### What you can open
 
 | Input | Notes |

@@ -87,6 +87,65 @@ class GuiTests(unittest.TestCase):
             self.app.open_pack_folder("mods")
         self.assertTrue(info.called)
 
+    def _select(self, code):
+        for iid, f in self.app._finding_by_iid.items():
+            if f.code == code:
+                self.app.tree.selection_set(iid)
+                self.app.update()
+                return f
+        self.fail(f"no {code} finding")
+
+    def test_developer_trace_and_buttons(self):
+        import json
+        self.analyze()
+        f = self._select("missing_dep")
+        detail = self.app.detail.get("1.0", "end")
+        self.assertIn("Where this comes from", detail)
+        self.assertIn('depends."cool-lib"', detail)
+        self.assertEqual([b.state() for b in self.app.dev_btns], [(), (), ()])  # all three usable
+        self.app.copy_debug()
+        doc = json.loads(self.app.clipboard_get())
+        self.assertEqual(doc["finding"]["code"], "missing_dep")
+        self.assertTrue(doc["finding"]["trace"] and doc["files"][0]["sha1"])
+        opened = []
+        with mock.patch.object(self.gui, "reveal_in_file_manager", side_effect=opened.append):
+            self.app.reveal_jar()
+        self.assertEqual([p.name for p in opened], ["needs-lib.jar"])
+
+    def test_metadata_viewer_highlights_the_failing_line(self):
+        import zipfile
+        fakepack.forge_jar(self.inst / "mods" / "halfbroken.jar", "halfbroken", "1.0")
+        with zipfile.ZipFile(self.inst / "mods" / "halfbroken.jar", "a") as z:
+            z.writestr("fabric.mod.json", '{\n  "id": "x",\n  oops\n}')
+        self.analyze()
+        f = next(x for x in self.app.result.findings if x.code == "bad_metadata" and "halfbroken" in x.title)
+        before = set(self.app.winfo_children())
+        self.app.view_metadata(f.files[0])
+        self.app.update()
+        win = next(w for w in self.app.winfo_children() if w not in before and isinstance(w, self.gui.tk.Toplevel))
+        texts = [w for w in win.winfo_children()[2].winfo_children() if isinstance(w, self.gui.tk.Text)]
+        self.assertIn("oops", texts[0].get("1.0", "end"))
+        self.assertTrue(texts[0].tag_ranges("err") or "line" not in f.trace[-1].lower())
+        win.destroy()
+
+    def test_ignore_button_hides_the_warning_and_it_can_be_shown_again(self):
+        import zipfile
+        self._patched_dialogs()
+        fakepack.forge_jar(self.inst / "mods" / "halfbroken.jar", "halfbroken", "1.0")
+        with zipfile.ZipFile(self.inst / "mods" / "halfbroken.jar", "a") as z:
+            z.writestr("fabric.mod.json", "{ not json")
+        self.analyze()
+        f = self._select("bad_metadata")
+        fx = next(x for x in f.fixes if x.actions[0].kind == "ignore_finding")
+        n = len(self.app.result.findings)
+        self.app._apply([fx])
+        self.wait()
+        self.wait()
+        self.assertLess(len(self.app.result.findings), n)
+        self.app.show_ignored_again()
+        self.wait()
+        self.assertEqual(len(self.app.result.findings), n)
+
     def test_filters(self):
         self.analyze()
         total = len(self.app.tree.get_children())

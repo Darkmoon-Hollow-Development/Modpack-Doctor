@@ -5,7 +5,7 @@ import json
 from typing import Callable, Optional
 
 from . import analyzer, configcheck, enrich, fixer
-from .models import Action, AnalysisResult, score_findings
+from .models import Action, AnalysisResult, Fix, score_findings
 from .rules import load_rules
 from .sources import Options, open_source
 
@@ -26,6 +26,23 @@ def run_analysis(source: str, opts: Options, *, online: bool = False, rules_path
                                 "The analysis does not cover these:\n" + lines))
     if online:
         enrich.add_update_findings(pack, jars, findings, progress)
+    for f in findings:
+        if not f.trace:
+            f.trace = [f"Check: {f.code}"] + [f"File: {x}" for x in f.files[:12]]
+        if f.severity != "error":  # errors are never hideable; warnings and tips can be
+            f.fixes.append(Fix("Ignore this " + ("warning" if f.severity == "warning" else "tip")
+                               + " (hide it for this pack; undo brings it back)",
+                               [Action("ignore_finding", {"code": f.code, "files": f.files, "title": f.title})],
+                               auto=False))
+    hidden = 0
+    if pack.root is not None:
+        ignored = fixer.load_ignored(pack.root)
+        if ignored:
+            kept = [f for f in findings if fixer.ignore_key(f.code, f.files) not in ignored]
+            hidden, findings = len(findings) - len(kept), kept
+    if hidden:
+        pack.notes.append(f"{hidden} finding(s) are hidden because you chose to ignore them "
+                          "(Tools > Show ignored warnings again).")
     order = {"error": 0, "warning": 1, "info": 2}
     findings.sort(key=lambda f: (order[f.severity], f.category, f.title))
     score, verdict = score_findings(findings)
@@ -44,7 +61,7 @@ def reanalyze(prev: AnalysisResult, *, online: bool = False, rules_path: Optiona
     opts = Options(mc=p.mc_version, loader=p.loader, side=p.side, loader_version=p.loader_version,
                    name=p.name, source_label=p.source, unresolved=list(p.unresolved), max_mem_mb=p.max_mem_mb)
     res = run_analysis(str(p.root), opts, online=online, rules_path=rules_path, progress=progress)
-    res.pack.notes[:0] = [n for n in p.notes if n not in res.pack.notes]
+    res.pack.notes[:0] = [n for n in p.notes if n not in res.pack.notes and "because you chose to ignore" not in n]
     return res
 
 

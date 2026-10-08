@@ -17,6 +17,7 @@ class Dependency:
     version_range: Any = None
     syntax: str = "fabric"  # "maven" (Forge/NeoForge) or "fabric" (Fabric/Quilt)
     side: str = "both"  # both | client | server
+    path: str = ""  # where it was declared, e.g. 'depends."fabric-api"' (for the developer trace)
 
 
 @dataclass
@@ -30,6 +31,8 @@ class ModInfo:
     environment: str = "both"  # both | client | server
     client_only_hint: bool = False
     description: str = ""
+    source: str = ""  # the metadata file inside the jar this came from, e.g. META-INF/mods.toml
+    note: str = ""  # something odd about how it was read (e.g. recovered from invalid TOML)
 
     @property
     def display(self) -> str:
@@ -45,6 +48,7 @@ class JarInfo:
     mods: list = field(default_factory=list)  # top-level ModInfo entries
     bundled: list = field(default_factory=list)  # jar-in-jar ModInfo entries
     errors: list = field(default_factory=list)
+    meta_files: list = field(default_factory=list)  # [{file, ok, error, mods}] for every metadata file we tried
     _sha1: Optional[str] = None
 
     @property
@@ -104,6 +108,7 @@ class Finding:
     mods: list = field(default_factory=list)
     files: list = field(default_factory=list)  # jar paths relative to the instance root
     fixes: list = field(default_factory=list)
+    trace: list = field(default_factory=list)  # developer view: which check, jar, metadata file and key produced this
 
     def to_dict(self) -> dict:
         return {
@@ -115,6 +120,7 @@ class Finding:
             "mods": self.mods,
             "files": self.files,
             "fixes": [f.to_dict() for f in self.fixes],
+            "trace": self.trace,
         }
 
 

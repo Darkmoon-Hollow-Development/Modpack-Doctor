@@ -71,6 +71,8 @@ def to_markdown(r: AnalysisResult) -> str:
                 md += ["", f.detail.replace("\n", "  \n")]
             if f.fixes:
                 md += ["", "Possible fixes:"] + [f"- {fx.label}{' *(recommended)*' if fx.auto else ''}" for fx in f.fixes]
+            if f.trace:
+                md += ["", "<details><summary>Where this comes from</summary>", "", "```"] + f.trace + ["```", "", "</details>"]
             md.append("")
     return "\n".join(md)
 

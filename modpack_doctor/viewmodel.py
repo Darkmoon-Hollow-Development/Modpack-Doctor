@@ -512,3 +512,91 @@ def pack_folders(result: Optional[AnalysisResult] = None, source: str = "") -> d
         except OSError:
             pass
     return out
+
+
+# ---------------------------------------------------------------------------- developer view
+METADATA_NAMES = ("fabric.mod.json", "quilt.mod.json", "META-INF/neoforge.mods.toml", "META-INF/mods.toml",
+                  "mcmod.info", "META-INF/MANIFEST.MF", "pack.mcmeta")
+MAX_VIEW_BYTES = 512 * 1024
+
+
+def _jar_on_disk(root: Path, rel: str) -> Optional[Path]:
+    """The jar for a finding's relative path (also when it has since been disabled), kept inside ``root``."""
+    base = Path(root).resolve()
+    for name in (rel, rel + ".disabled"):
+        p = (base / name).resolve()
+        if (p == base or base in p.parents) and p.is_file():
+            return p
+    return None
+
+
+def jar_metadata_files(root: Path, rel: str) -> list:
+    """[(name, size)] of the metadata files inside a jar, plus any jar-in-jar libraries (listed, not opened)."""
+    import zipfile
+    p = _jar_on_disk(root, rel)
+    if p is None:
+        return []
+    try:
+        with zipfile.ZipFile(p) as zf:
+            info = {i.filename: i.file_size for i in zf.infolist()}
+    except (zipfile.BadZipFile, OSError):
+        return []
+    out = [(n, info[n]) for n in METADATA_NAMES if n in info]
+    out += [(n, info[n]) for n in sorted(info) if n.lower().endswith(".jar") and
+            n.startswith(("META-INF/jars/", "META-INF/jarjar/"))]
+    return out
+
+
+def read_jar_text(root: Path, rel: str, name: str) -> str:
+    """Text of one file inside a jar (size-limited, decoded leniently). Raises OSError/KeyError on problems."""
+    import zipfile
+    p = _jar_on_disk(root, rel)
+    if p is None:
+        raise OSError(f"{rel} was not found (moved or deleted since the scan?)")
+    with zipfile.ZipFile(p) as zf:
+        info = zf.getinfo(name)
+        if name.lower().endswith(".jar"):
+            return f"(This is a library jar bundled inside the mod: {info.file_size} bytes. It is scanned for mods too, but not opened here.)"
+        with zf.open(info) as f:
+            data = f.read(MAX_VIEW_BYTES + 1)
+    text = data[:MAX_VIEW_BYTES].decode("utf-8-sig", errors="replace")
+    return text + ("\n\n[... file cut off at 512 KB ...]" if len(data) > MAX_VIEW_BYTES else "")
+
+
+def error_line(message: str) -> Optional[int]:
+    """Line number mentioned by a TOML/JSON parse error ('at line 12, column 3' / 'line 3 column 9'), if any."""
+    m = re.search(r"line\s+(\d+)", message or "", re.I)
+    return int(m.group(1)) if m else None
+
+
+def _redact(text: str) -> str:
+    home = str(Path.home())
+    return text.replace(home, "~") if home and home != "/" else text
+
+
+def debug_info(result: AnalysisResult, finding) -> str:
+    """Everything a developer needs to reproduce or explain one finding, as JSON (home folder redacted)."""
+    from . import __version__
+    p = result.pack
+    jars = {j.rel: j for j in result.jars}
+    files = []
+    for rel in finding.files[:20]:
+        j = jars.get(rel)
+        if j is None:
+            files.append({"file": rel, "scanned": False})
+            continue
+        try:
+            sha1 = j.sha1
+        except OSError:
+            sha1 = None
+        files.append({"file": rel, "size": j.size, "sha1": sha1, "errors": j.errors, "metadata_files": j.meta_files,
+                      "mods": [{"id": m.mod_id, "version": m.version, "loader": m.loader, "source": m.source,
+                                "environment": m.environment} for m in j.mods],
+                      "bundled_mods": [{"id": m.mod_id, "version": m.version, "loader": m.loader}
+                                       for m in j.bundled[:30]]})
+    doc = {"tool": {"name": "Modpack Doctor", "version": __version__, "python": sys.version.split()[0],
+                    "platform": sys.platform},
+           "pack": {"name": p.name, "minecraft": p.mc_version, "loader": p.loader, "loader_version": p.loader_version,
+                    "side": p.side, "mods": p.mod_count, "notes": p.notes, "source": p.source},
+           "finding": finding.to_dict(), "files": files}
+    return _redact(json.dumps(doc, indent=2, default=str))

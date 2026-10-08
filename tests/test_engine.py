@@ -438,3 +438,82 @@ class ReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TraceAndIgnoreTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = fakepack.make_fabric_instance(Path(self.tmp.name) / "inst")
+
+    def analyze(self):
+        from modpack_doctor import pipeline
+        from modpack_doctor.sources import Options
+        return pipeline.run_analysis(str(self.root), Options())
+
+    def test_every_finding_has_a_trace_starting_with_its_check(self):
+        res = self.analyze()
+        for f in res.findings:
+            self.assertTrue(f.trace, f.code)
+            self.assertTrue(f.trace[0].startswith("Check:"), (f.code, f.trace[0]))
+
+    def test_dependency_trace_names_the_file_and_key(self):
+        res = self.analyze()
+        miss = next(f for f in res.findings if f.code == "missing_dep")
+        joined = "\n".join(miss.trace)
+        self.assertIn("needs-lib", joined.replace("_", "-"))  # the jar that needs it
+        self.assertIn("fabric.mod.json", joined)
+        self.assertIn('depends."cool-lib"', joined)
+
+    def test_rule_findings_point_at_rules_json(self):
+        res = self.analyze()
+        rule = next(f for f in res.findings if f.code == "rule_conflict")
+        self.assertTrue(any("rules.json > conflicts[" in line for line in rule.trace))
+
+    def test_partly_unreadable_metadata_is_traced_per_file(self):
+        mods = self.root / "mods"
+        fakepack.forge_jar(mods / "halfbroken.jar", "halfbroken", "1.0")
+        import zipfile
+        with zipfile.ZipFile(mods / "halfbroken.jar", "a") as z:
+            z.writestr("fabric.mod.json", "{ this is not json")
+        res = self.analyze()
+        f = next(x for x in res.findings if x.code == "bad_metadata" and "halfbroken" in x.title)
+        text = "\n".join(f.trace)
+        self.assertIn("fabric.mod.json: FAILED", text)
+        self.assertIn("mods.toml: read OK", text)
+
+    def test_ignore_hides_a_warning_and_undo_brings_it_back(self):
+        from modpack_doctor import fixer, pipeline
+        res = self.analyze()
+        warn = next(f for f in res.findings if f.severity == "warning")
+        fx = next(x for x in warn.fixes if x.actions[0].kind == "ignore_finding")
+        self.assertFalse(fx.auto)
+        cs = pipeline.apply(res, fx.actions)
+        self.assertEqual(len(cs["entries"]), 1)
+        again = self.analyze()
+        self.assertNotIn((warn.code, tuple(sorted(warn.files))),
+                         {(f.code, tuple(sorted(f.files))) for f in again.findings})
+        self.assertTrue(any("ignore" in n for n in again.pack.notes))
+        fixer.undo(self.root)
+        back = self.analyze()
+        self.assertIn((warn.code, tuple(sorted(warn.files))),
+                      {(f.code, tuple(sorted(f.files))) for f in back.findings})
+
+    def test_errors_cannot_be_ignored_and_clear_restores(self):
+        from modpack_doctor import fixer, pipeline
+        res = self.analyze()
+        for f in res.findings:
+            if f.severity == "error":
+                self.assertFalse(any(a.kind == "ignore_finding" for x in f.fixes for a in x.actions), f.code)
+        warns = [f for f in res.findings if f.severity != "error"]
+        pipeline.apply(res, [a for f in warns[:2] for x in f.fixes for a in x.actions if a.kind == "ignore_finding"])
+        self.assertGreaterEqual(fixer.clear_ignored(self.root), 2)
+        self.assertEqual(len(self.analyze().findings), len(res.findings))
+
+    def test_corrupt_ignore_file_is_harmless(self):
+        from modpack_doctor import fixer
+        (self.root / ".modpack_doctor").mkdir(exist_ok=True)
+        (self.root / ".modpack_doctor" / "ignored.json").write_text("{nope", encoding="utf-8")
+        self.assertEqual(fixer.load_ignored(self.root), set())
+        self.assertTrue(self.analyze().findings)

@@ -187,6 +187,53 @@ def _replace(root: Path, cs_id: str, params: dict) -> list:
     return [{"op": "replace", "old": _rel(root, old), "old_backup": backup, "new": _rel(root, new)}]
 
 
+# ----------------------------------------------------------------------- ignored findings
+IGNORE_FILE = "ignored.json"
+
+
+def _ignore_path(root: Path) -> Path:
+    return Path(root) / STATE_DIR / IGNORE_FILE
+
+
+def ignore_key(code: str, files) -> tuple:
+    return (str(code), tuple(sorted(str(f) for f in files or [])))
+
+
+def load_ignored(root: Path) -> set:
+    """Findings (code + affected files) the user chose to hide for this pack."""
+    try:
+        data = json.loads(_ignore_path(root).read_text(encoding="utf-8"))
+        return {ignore_key(e["code"], e.get("files")) for e in data.get("ignored", []) if isinstance(e, dict) and "code" in e}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return set()
+
+
+def clear_ignored(root: Path) -> int:
+    n = len(load_ignored(root))
+    try:
+        _ignore_path(root).unlink()
+    except OSError:
+        pass
+    return n
+
+
+def _ignore(root: Path, params: dict) -> dict:
+    path = _ignore_path(root)
+    previous = path.read_text(encoding="utf-8") if path.is_file() else None
+    try:
+        data = json.loads(previous) if previous else {}
+    except ValueError:
+        data = {}
+    items = [e for e in data.get("ignored", []) if isinstance(e, dict)]
+    entry = {"code": str(params["code"]), "files": sorted(str(f) for f in params.get("files", [])),
+             "title": str(params.get("title", ""))[:200]}
+    if all(ignore_key(e.get("code"), e.get("files")) != ignore_key(entry["code"], entry["files"]) for e in items):
+        items.append(entry)
+    _state(root)
+    path.write_text(json.dumps({"ignored": items}, indent=2), encoding="utf-8")
+    return {"op": "ignore", "previous": previous, "title": entry["title"] or entry["code"]}
+
+
 # ----------------------------------------------------------------------- public API
 
 def apply_actions(root: Path, actions: list, progress: Optional[Callable] = None) -> dict:
@@ -211,6 +258,8 @@ def apply_actions(root: Path, actions: list, progress: Optional[Callable] = None
             k, p = a.kind, a.params
             if k == "disable_mod":
                 entries.append(_disable(root, p))
+            elif k == "ignore_finding":
+                entries.append(_ignore(root, p))
             elif k == "edit_config":
                 entries.append(_apply_edit(root, cs_id, p))
             elif k == "replace_mod":
@@ -268,6 +317,12 @@ def undo(root: Path, cs_id: Optional[str] = None) -> dict:
                 if new.exists():
                     new.unlink()
                 shutil.copy2(bak, old)
+            elif e["op"] == "ignore":
+                path = _ignore_path(root)
+                if e.get("previous") is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_text(e["previous"], encoding="utf-8")
             elif e["op"] == "config":
                 shutil.copy2(_safe(root, e["backup"]), _safe(root, e["path"]))
         except (FixError, OSError) as ex:

@@ -136,13 +136,15 @@ _LOADER_DEP_IDS = {"minecraft", "forge", "neoforge"}
 def parse_forge_toml(text: str, loader: str, manifest_version: Optional[str]) -> list:
     try:
         doc = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
+    except tomllib.TOMLDecodeError as e:
         # Forge's own parser is more forgiving than tomllib; fall back to a regex so we still learn the id.
         ids = re.findall(r'modId\s*=\s*"([^"]+)"', text)
         vers = re.findall(r'^\s*version\s*=\s*"([^"]*)"', text, re.M)
         if not ids:
             raise
-        return [ModInfo(ids[0], _clean_version(vers[0]) if vers else manifest_version, loader)]
+        mi = ModInfo(ids[0], _clean_version(vers[0]) if vers else manifest_version, loader)
+        mi.note = f"TOML is not strictly valid ({e}); only the mod id and version were recovered, dependencies were not read"
+        return [mi]
     mods_tbl = doc.get("mods") or []
     deps_tbl = doc.get("dependencies") or {}
     if not isinstance(deps_tbl, dict):
@@ -199,30 +201,54 @@ def parse_mcmod_info(text: str) -> list:
 
 # ----------------------------------------------------------------------- jar scanning
 
-def _scan_zip(zf: zipfile.ZipFile, depth: int, budget: list) -> tuple:
-    """Return (mods, bundled_mods, errors) for one zip file."""
+_FABRIC_KEYS = {"required": "depends", "recommended": "recommends", "suggested": "suggests",
+                "conflicts": "conflicts", "breaks": "breaks"}
+
+
+def _annotate(mods: list, source: str) -> None:
+    """Remember which metadata file (and which key inside it) every mod and dependency came from."""
+    for m in mods:
+        m.source = source
+        for d in m.deps:
+            if d.syntax == "maven":
+                d.path = f'[[dependencies.{m.mod_id}]] modId = "{d.mod_id}"'
+            elif source == "quilt.mod.json":
+                d.path = f'quilt_loader.{"breaks" if d.kind == "breaks" else "depends"} "{d.mod_id}"'
+            else:
+                d.path = f'{_FABRIC_KEYS.get(d.kind, d.kind)}."{d.mod_id}"'
+
+
+def _scan_zip(zf: zipfile.ZipFile, depth: int, budget: list, meta: Optional[list] = None) -> tuple:
+    """Return (mods, bundled_mods, errors) for one zip file. ``meta`` collects a record per metadata file."""
     mods, bundled, errors = [], [], []
     names = set(zf.namelist())
     manifest_version = _manifest_version(zf)
 
-    def attempt(label: str, fn):
+    def attempt(label: str, fn, file: str = ""):
         try:
-            mods.extend(fn())
+            found = fn()
+            _annotate(found, file or label)
+            mods.extend(found)
+            if meta is not None:
+                meta.append({"file": file or label, "ok": True, "error": "", "mods": [m.mod_id for m in found],
+                             "note": next((m.note for m in found if m.note), "")})
         except Exception as e:  # malformed metadata must never abort the scan
             errors.append(f"{label}: {type(e).__name__}: {e}")
+            if meta is not None:
+                meta.append({"file": file or label, "ok": False, "error": f"{type(e).__name__}: {e}", "mods": []})
 
     if "fabric.mod.json" in names:
-        attempt("fabric.mod.json", lambda: parse_fabric(lenient_json_loads(_text(_read(zf, "fabric.mod.json")))))
+        attempt("fabric.mod.json", lambda: parse_fabric(lenient_json_loads(_text(_read(zf, "fabric.mod.json")))), "fabric.mod.json")
     if "quilt.mod.json" in names:
-        attempt("quilt.mod.json", lambda: parse_quilt(lenient_json_loads(_text(_read(zf, "quilt.mod.json")))))
+        attempt("quilt.mod.json", lambda: parse_quilt(lenient_json_loads(_text(_read(zf, "quilt.mod.json")))), "quilt.mod.json")
     if "META-INF/neoforge.mods.toml" in names:
         attempt("neoforge.mods.toml", lambda: parse_forge_toml(
-            _text(_read(zf, "META-INF/neoforge.mods.toml")), "neoforge", manifest_version))
+            _text(_read(zf, "META-INF/neoforge.mods.toml")), "neoforge", manifest_version), "META-INF/neoforge.mods.toml")
     if "META-INF/mods.toml" in names:
         attempt("mods.toml", lambda: parse_forge_toml(
-            _text(_read(zf, "META-INF/mods.toml")), "forge", manifest_version))
+            _text(_read(zf, "META-INF/mods.toml")), "forge", manifest_version), "META-INF/mods.toml")
     if "mcmod.info" in names and not any(m.loader in ("forge", "neoforge") for m in mods):
-        attempt("mcmod.info", lambda: parse_mcmod_info(_text(_read(zf, "mcmod.info"))))
+        attempt("mcmod.info", lambda: parse_mcmod_info(_text(_read(zf, "mcmod.info"))), "mcmod.info")
 
     if depth < MAX_DEPTH:
         nested = sorted(n for n in names
@@ -256,7 +282,7 @@ def scan_jar(path: Path, root: Path) -> JarInfo:
     jar = JarInfo(path=path, rel=rel, size=size)
     try:
         with zipfile.ZipFile(path) as zf:
-            jar.mods, jar.bundled, jar.errors = _scan_zip(zf, 0, [MAX_NESTED_TOTAL_BYTES])
+            jar.mods, jar.bundled, jar.errors = _scan_zip(zf, 0, [MAX_NESTED_TOTAL_BYTES], jar.meta_files)
     except zipfile.BadZipFile:
         jar.errors.append("Not a valid jar/zip file (corrupt or incomplete download?)")
     except OSError as e:

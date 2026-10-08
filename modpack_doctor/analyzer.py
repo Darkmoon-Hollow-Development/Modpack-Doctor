@@ -69,12 +69,24 @@ class Analyzer:
         self._check_side()
         self._recommend()
         self.findings.sort(key=lambda f: ({"error": 0, "warning": 1, "info": 2}[f.severity], f.category, f.title))
+        for f in self.findings:
+            f.trace.insert(0, f"Check: {f.code} ({CHECKS.get(f.code, 'analyzer')})")
         return self.findings
 
     def _add(self, *a, **kw) -> Finding:
         f = Finding(*a, **kw)
         self.findings.append(f)
         return f
+
+    # ---- developer trace helpers: say exactly where in which file a finding comes from
+    @staticmethod
+    def _src(jar: JarInfo, m: ModInfo) -> str:
+        return f'{jar.rel} > {m.source or "(metadata file unknown)"} > mod "{m.mod_id}"' + \
+               (f" version {m.version}" if m.version else "")
+
+    def _dep_trace(self, jar: JarInfo, m: ModInfo, d) -> str:
+        rng = format_range(d.version_range)
+        return f'{self._src(jar, m)} > {d.path or d.mod_id} [{d.kind}, wants {rng}]'
 
     # ------------------------------------------------------------------ classification
     def _classify(self) -> None:
@@ -89,7 +101,9 @@ class Analyzer:
                 if jar.errors:
                     self._add("warning", "bad_metadata", "Metadata problem",
                               f"{jar.rel}: the mod metadata could not be read", "\n".join(jar.errors),
-                              files=[jar.rel])
+                              files=[jar.rel], trace=self._meta_trace(jar),
+                              fixes=[Fix("Disable this jar (the loader most likely cannot read it either)",
+                                         [Action("disable_mod", {"file": jar.rel})], auto=False)])
                 else:
                     no_meta.append(jar)
                 continue
@@ -101,11 +115,14 @@ class Analyzer:
             if jar.errors:
                 self._add("warning", "bad_metadata", "Metadata problem",
                           f"{jar.rel}: part of this jar's mod metadata could not be read",
-                          "\n".join(jar.errors), files=[jar.rel])
+                          "\n".join(jar.errors) + "\n\nThe mod itself was recognised from its other metadata, so this is "
+                          "often harmless (for example a second loader's file that is slightly malformed).",
+                          files=[jar.rel], trace=self._meta_trace(jar))
         for jar in bad:
             self._add("error", "bad_jar", "Unreadable jar", f"{jar.rel} cannot be read",
                       "\n".join(jar.errors) + "\nThe file is probably corrupt or a partial download. "
                       "Delete it and download it again.", files=[jar.rel],
+                      trace=[f"{jar.rel} > zip container: {jar.errors[0] if jar.errors else 'unreadable'}"],
                       fixes=[Fix("Disable this file", [Action("disable_mod", {"file": jar.rel})], auto=False)])
         if no_meta:
             names = [j.rel for j in no_meta]
@@ -113,11 +130,24 @@ class Analyzer:
             self._add("info", "no_metadata", "Jars without mod metadata",
                       f"{len(names)} jar(s) contain no recognizable mod metadata",
                       "These are usually libraries, coremods, or mods for an old loader version. "
-                      "They cannot be checked for compatibility.\n" + shown, files=names)
+                      "They cannot be checked for compatibility.\n" + shown, files=names,
+                      trace=[f"{j.rel} > none of fabric.mod.json, quilt.mod.json, META-INF/(neoforge.)mods.toml, "
+                             "mcmod.info found" for j in no_meta[:40]])
 
         self.has_connector = any(_norm_id(m.mod_id) == "connector" for _, m in self.active)
         if self.inert:
             self._report_loader_mismatch()
+
+    @staticmethod
+    def _meta_trace(jar: JarInfo) -> list:
+        lines = []
+        for mf in jar.meta_files:
+            if mf["ok"]:
+                note = f" - NOTE: {mf['note']}" if mf.get("note") else ""
+                lines.append(f'{jar.rel} > {mf["file"]}: read OK, mods: {", ".join(mf["mods"]) or "none declared"}{note}')
+            else:
+                lines.append(f'{jar.rel} > {mf["file"]}: FAILED - {mf["error"]}')
+        return lines or [f"{jar.rel}: {e}" for e in jar.errors]
 
     def _report_loader_mismatch(self) -> None:
         pack = self.pack
@@ -133,12 +163,15 @@ class Analyzer:
                           f"{names} is a Fabric mod running through Sinytra Connector",
                           "Connector can load many Fabric mods on Forge/NeoForge, but compatibility varies "
                           "per mod. If the game crashes, this is a good first suspect.",
-                          mods=[m.mod_id for m in mods], files=[rel])
+                          mods=[m.mod_id for m in mods], files=[rel],
+                          trace=[f'{rel} > {m.source} > mod "{m.mod_id}" is a {m.loader} mod' for m in mods])
             else:
                 self._add("error", "loader_mismatch", "Loader",
                           f"{names} is built for {'/'.join(loaders)}, but this pack uses {pack.loader}",
                           f"{rel} will not load. Replace it with the {pack.loader} version of the mod, "
                           "or remove it.", mods=[m.mod_id for m in mods], files=[rel],
+                          trace=[f'{rel} > {m.source} > mod "{m.mod_id}" is a {m.loader} mod; pack loader is {pack.loader} '
+                                 f'(from: {"; ".join(pack.notes[:2]) or "launcher files or the mods themselves"})' for m in mods],
                           fixes=[Fix("Disable this jar", [Action("disable_mod", {"file": rel})], auto=False)])
 
     # ------------------------------------------------------------------ availability map
@@ -257,7 +290,8 @@ class Analyzer:
                       f"{m.display} is built for Minecraft {format_range(d.version_range)}, not {pack.mc_version}",
                       f"{jar.rel} requires Minecraft {format_range(d.version_range)} but this pack runs "
                       f"{pack.mc_version}. Replace it with a build for {pack.mc_version}.",
-                      mods=[m.mod_id], files=[jar.rel], fixes=[self._mod_fix_disable(jar)])
+                      mods=[m.mod_id], files=[jar.rel], fixes=[self._mod_fix_disable(jar)],
+                      trace=[self._dep_trace(jar, m, d), f"Pack Minecraft version is {pack.mc_version}"])
 
     def _report_loader_versions(self, bad: dict) -> None:
         for did, items in bad.items():
@@ -266,7 +300,9 @@ class Analyzer:
             self._add("error", "loader_version", "Loader version",
                       f"{did} {have} does not satisfy {len(items)} mod(s)", reqs +
                       "\nUpdate (or downgrade) the mod loader in your launcher, or replace the listed mods.",
-                      mods=[m.mod_id for _, m, _ in items], files=[j.rel for j, _, _ in items])
+                      mods=[m.mod_id for _, m, _ in items], files=[j.rel for j, _, _ in items],
+                      trace=[self._dep_trace(j, m, d) for j, m, d in items[:12]] +
+                            [f"Installed loader: {did} {have}"])
 
     def _display_for(self, did: str) -> str:
         return {"fabric-api": "Fabric API"}.get(did, did)
@@ -301,7 +337,10 @@ class Analyzer:
             self._add("error", "missing_dep", "Missing dependency",
                       f'Missing required mod "{self._display_for(did)}" (needed by {who}{more})',
                       "These mods will refuse to load, or crash the game at startup, without it:\n" + "\n".join(lines[:15]),
-                      mods=sorted({m.mod_id for _, m, _ in items}), files=sorted(seen_files), fixes=fixes)
+                      mods=sorted({m.mod_id for _, m, _ in items}), files=sorted(seen_files), fixes=fixes,
+                      trace=[self._dep_trace(j, m, d) for j, m, d in items[:12]] +
+                            [f'No installed mod provides id "{did}" (looked at mod ids, "provides" lists, '
+                             "bundled jar-in-jar libraries and the loader's built-in ids)"])
 
     def _report_mismatch(self, mismatch: dict) -> None:
         for (did, rel, _), items in sorted(mismatch.items()):
@@ -311,7 +350,10 @@ class Analyzer:
                       f'{m.display} needs "{did}" {format_range(d.version_range)}, but {have} is installed',
                       f"{rel} requires a different version of \"{did}\". Update or downgrade \"{did}\", "
                       f"or replace {m.name or m.mod_id}.",
-                      mods=[m.mod_id, did], files=[rel] + [p.jar.rel for p in provs if p.jar])
+                      mods=[m.mod_id, did], files=[rel] + [p.jar.rel for p in provs if p.jar],
+                      trace=[self._dep_trace(jar, m, d)] +
+                            [f'{p.jar.rel if p.jar else "loader built-in"} provides "{did}" version {p.version or "unknown"}'
+                             for p in provs])
 
     def _report_soft_mismatch(self, soft: list) -> None:
         seen = set()
@@ -324,7 +366,10 @@ class Analyzer:
             self._add("warning", "dep_version", "Dependency version",
                       f'{m.display} works best with "{d.mod_id}" {format_range(d.version_range)}, but {have} is installed',
                       "This is an optional dependency, so the game may still start, but the integration "
-                      "can be disabled or buggy.", mods=[m.mod_id, d.mod_id], files=[jar.rel])
+                      "can be disabled or buggy.", mods=[m.mod_id, d.mod_id], files=[jar.rel],
+                      trace=[self._dep_trace(jar, m, d)] +
+                            [f'{p.jar.rel if p.jar else "loader built-in"} provides "{d.mod_id}" version {p.version or "unknown"}'
+                             for p in provs])
 
     def _report_breaks(self, breaks: dict) -> None:
         for key, (jar, m, d, p) in breaks.items():
@@ -337,7 +382,9 @@ class Analyzer:
             self._add(severity, "incompatible", "Declared incompatibility",
                       f'{m.display} {verb} "{other_name}"{" " + format_range(d.version_range) if d.version_range not in (None, "*") else ""}',
                       "The mod's own metadata says these two cannot be used together. Remove one of them.",
-                      mods=[m.mod_id, other_name], files=[jar.rel] + ([p.jar.rel] if p.jar else []), fixes=fixes)
+                      mods=[m.mod_id, other_name], files=[jar.rel] + ([p.jar.rel] if p.jar else []), fixes=fixes,
+                      trace=[self._dep_trace(jar, m, d),
+                             f'{p.jar.rel if p.jar else "loader built-in"} provides "{other_name}" version {p.version or "unknown"}'])
 
     def _report_recommended(self, rec: dict) -> None:
         if not rec:
@@ -368,7 +415,8 @@ class Analyzer:
                       f'Mod "{keep_mod.name or did}" is installed {len(entries)} times',
                       "Forge, NeoForge, Fabric and Quilt all refuse to start with the same mod id loaded twice. "
                       "The newest version is recommended:\n" + "\n".join(lines),
-                      mods=[keep_mod.mod_id], files=[j.rel for j, _ in entries], fixes=fixes)
+                      mods=[keep_mod.mod_id], files=[j.rel for j, _ in entries], fixes=fixes,
+                      trace=[self._src(j, m) for j, m in entries])
 
         top_ids = set(by_id)
         for jar, m in self.active:
@@ -380,7 +428,8 @@ class Analyzer:
                               f'{m.display} provides "{p}", which is also installed as a separate mod',
                               f"{jar.rel} and {other.rel} cover the same mod id. Fabric/Quilt typically refuse "
                               "to load this combination.", mods=[m.mod_id, p], files=[jar.rel, other.rel],
-                              fixes=[self._mod_fix_disable(jar), self._mod_fix_disable(other)])
+                              fixes=[self._mod_fix_disable(jar), self._mod_fix_disable(other)],
+                              trace=[f'{self._src(jar, m)} > provides "{p}"', f'{other.rel} is installed as mod id "{pid}"'])
 
     # ------------------------------------------------------------------ rule database
     def _present(self) -> dict:
@@ -391,7 +440,7 @@ class Analyzer:
 
     def _check_rule_conflicts(self) -> None:
         present = self._present()
-        for rule in self.rules.get("conflicts", []):
+        for ri, rule in enumerate(self.rules.get("conflicts", [])):
             a = [x for x in map(_norm_id, rule["a"]) if x in present]
             b = [x for x in map(_norm_id, rule["b"]) if x in present]
             if not a or not b:
@@ -405,11 +454,13 @@ class Analyzer:
             fixes = [fix_a, fix_b] if rule.get("prefer", "b") == "b" else [fix_b, fix_a]
             self._add(rule.get("severity", "warning"), "rule_conflict", "Known conflict",
                       f"{', '.join(a)} conflicts with {', '.join(b)}", rule["message"],
-                      mods=a + b, files=sorted(set(side_a) | set(side_b)), fixes=fixes)
+                      mods=a + b, files=sorted(set(side_a) | set(side_b)), fixes=fixes,
+                      trace=[f"rules.json > conflicts[{ri}]: a={rule['a']} b={rule['b']} severity={rule.get('severity', 'warning')}"] +
+                            [f'{j.rel} matches "{x}"' for x in a + b for j, _ in present[x]][:12])
 
     def _check_redundant(self) -> None:
         present = self._present()
-        for rule in self.rules.get("redundant", []):
+        for ri, rule in enumerate(self.rules.get("redundant", [])):
             group = [x for x in map(_norm_id, rule["group"]) if x in present]
             if len(group) < 2:
                 continue
@@ -423,7 +474,9 @@ class Analyzer:
                                  [Action("disable_mod", {"file": r}) for r in drop_files]))
             self._add(rule.get("severity", "info"), "rule_redundant", "Redundant mods",
                       f"Overlapping mods installed: {', '.join(group)}", rule["message"],
-                      mods=group, files=sorted({j.rel for x in group for j, _ in present[x]}), fixes=fixes)
+                      mods=group, files=sorted({j.rel for x in group for j, _ in present[x]}), fixes=fixes,
+                      trace=[f"rules.json > redundant[{ri}]: group={rule['group']}"] +
+                            [f'{j.rel} matches "{x}"' for x in group for j, _ in present[x]][:12])
 
     # ------------------------------------------------------------------ client/server side
     def _check_side(self) -> None:
@@ -436,6 +489,8 @@ class Analyzer:
                           f"{jar.rel} is declared as client-side. On a dedicated server it is useless at best and "
                           "a frequent source of startup crashes at worst.",
                           mods=[m.mod_id], files=[jar.rel],
+                          trace=[f'{self._src(jar, m)} > environment = "{m.environment}"'
+                                 + (" (client-only dependency on the loader)" if m.client_only_hint else "")],
                           fixes=[self._mod_fix_disable(jar, f"Disable {jar.rel}", auto=True)])
 
     # ------------------------------------------------------------------ recommendations
@@ -444,7 +499,7 @@ class Analyzer:
         if not pack.loader or len(self.active) < 10:
             return
         present = self._present()
-        for rule in self.rules.get("recommended", []):
+        for ri, rule in enumerate(self.rules.get("recommended", [])):
             if pack.loader not in rule.get("loaders", []):
                 continue
             if rule.get("client_only") and pack.side == "server":
@@ -460,7 +515,22 @@ class Analyzer:
                                                              "loader": pack.loader, "display": display})],
                                  auto=False, needs_network=True))
             self._add("info", "recommend", "Suggestion", rule["title"], rule["message"],
-                      mods=[slug] if slug else [], fixes=fixes)
+                      mods=[slug] if slug else [], fixes=fixes,
+                      trace=[f"rules.json > recommended[{ri}]: loaders={rule.get('loaders')}, "
+                             f"absent_if_any={rule.get('absent_if_any', [])}",
+                             f"none of those mod ids is installed; pack loader is {pack.loader}"])
+
+
+CHECKS = {
+    "bad_metadata": "Analyzer._classify", "bad_jar": "Analyzer._classify", "no_metadata": "Analyzer._classify",
+    "loader_mismatch": "Analyzer._report_loader_mismatch", "mc_version": "Analyzer._report_mc_mismatch",
+    "mc_mismatch": "Analyzer._report_mc_mismatch", "loader_version": "Analyzer._report_loader_versions",
+    "missing_dep": "Analyzer._report_missing", "dep_version": "Analyzer._report_mismatch / _report_soft_mismatch",
+    "incompatible": "Analyzer._report_breaks", "recommended_deps": "Analyzer._report_recommended",
+    "duplicate": "Analyzer._check_duplicates", "provides_clash": "Analyzer._check_duplicates",
+    "rule_conflict": "Analyzer._check_rule_conflicts", "rule_redundant": "Analyzer._check_redundant",
+    "client_only": "Analyzer._check_side", "recommend": "Analyzer._recommend",
+}
 
 
 def analyze(pack: PackContext, jars: list, rules: dict) -> list:
