@@ -367,8 +367,10 @@ class App(tk.Tk):
         except Exception:  # noqa: BLE001
             pass
         try:
-            png = Path(__file__).parent / "data" / "icon.png"
-            self._icon_img = tk.PhotoImage(file=str(png))  # keep a reference or Tk drops it
+            import base64
+            import pkgutil
+            png = pkgutil.get_data("modpack_doctor", "data/icon.png")  # works inside a single-file .pyz too
+            self._icon_img = tk.PhotoImage(data=base64.b64encode(png))  # keep a reference or Tk drops it
             self.iconphoto(True, self._icon_img)
         except Exception:  # noqa: BLE001
             pass

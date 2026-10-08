@@ -72,7 +72,8 @@ class GuiTests(unittest.TestCase):
 
     def test_folder_buttons_and_icon(self):
         self.assertTrue(self.app.iconphoto)  # window icon was set without error
-        self.assertTrue((Path(self.gui.__file__).parent / "data" / "icon.png").is_file())
+        self.assertTrue(__import__("pkgutil").get_data("modpack_doctor", "data/icon.png").startswith(b"\x89PNG"))
+        self.assertTrue(getattr(self.app, "_icon_img", None))  # the icon image was actually loaded
         self.app.update()
         self.assertNotIn("disabled", self.app.mods_btn.state())  # known from the source folder before any scan
         opened = []

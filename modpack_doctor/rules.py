@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 import json
+import pkgutil
 from pathlib import Path
 from typing import Optional
 
 from .util import lenient_json_loads
 
-_DEFAULT = Path(__file__).parent / "data" / "rules.json"
 _LIST_KEYS = ("conflicts", "redundant", "recommended", "config_rules", "ram_guidance")
 
 
 def load_rules(extra_path: Optional[str] = None) -> dict:
-    rules = json.loads(_DEFAULT.read_text(encoding="utf-8"))
+    # pkgutil also works when the app runs from inside a single-file .pyz archive
+    rules = json.loads(pkgutil.get_data("modpack_doctor", "data/rules.json").decode("utf-8"))
     if extra_path:
         extra = lenient_json_loads(Path(extra_path).read_text(encoding="utf-8"))
         for key in _LIST_KEYS:

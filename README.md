@@ -27,16 +27,21 @@ Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MI
 You need **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/). On Windows tick **"Add python.exe to PATH"**
 in the Python installer. Nothing else needs installing: the app uses only Python's standard library.
 
+### Easiest: the single file
+
+1. Open the **Releases** page of this repository (right-hand column) and download **`ModpackDoctor.pyzw`** from the newest release.
+2. **Windows:** double-click it. **Any system:** run `python ModpackDoctor.pyzw`.
+
+That one file is the whole app. Keep it anywhere; delete it to remove the app (settings live in `~/.modpack_doctor`).
+On Debian/Ubuntu Linux install the window toolkit once first: `sudo apt install python3-tk`.
+
+### From the source code
+
 1. On this page click the green **Code** button, then **Download ZIP**, and unzip it anywhere.
    (Or, if you use Git: `git clone <repository address>`.)
 2. Start the app:
    - **Windows:** double-click **`ModpackDoctor.pyw`**.
-   - **Any system**, from a terminal opened inside the unzipped folder:
-     ```
-     python -m modpack_doctor
-     ```
-3. On Debian/Ubuntu Linux, install the window toolkit once first: `sudo apt install python3-tk`.
-   Windows and macOS already include it.
+   - **Any system**, from a terminal opened inside the unzipped folder: `python -m modpack_doctor`
 
 Prefer a command? From the unzipped folder, `pip install .` adds a `modpack-doctor` command:
 
@@ -148,6 +153,13 @@ command line). Its lists are added to the built-in ones. Pull requests that exte
 ---
 
 ## For developers
+
+**Build the single file yourself:** `python tools/build_single_file.py` writes `dist/ModpackDoctor.pyzw` (a standard-library zipapp).
+
+**Publish a release:** bump the version in `modpack_doctor/__init__.py` and `pyproject.toml`, commit, then push a tag:
+`git tag v0.1.0` and `git push origin v0.1.0`. The *Release* workflow runs the tests, builds `ModpackDoctor.pyzw` and
+attaches it to a new GitHub Release (GitHub adds the source ZIP automatically). You can also create the release by hand on the
+Releases page and drag the built file in.
 
 ```
 python -m unittest discover -s tests            # engine tests; GUI tests are skipped without tkinter and a display

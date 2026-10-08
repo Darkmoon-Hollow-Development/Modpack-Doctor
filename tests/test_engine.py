@@ -517,3 +517,25 @@ class TraceAndIgnoreTests(unittest.TestCase):
         (self.root / ".modpack_doctor" / "ignored.json").write_text("{nope", encoding="utf-8")
         self.assertEqual(fixer.load_ignored(self.root), set())
         self.assertTrue(self.analyze().findings)
+
+
+class SingleFileBuildTests(unittest.TestCase):
+    def test_the_one_file_app_runs_and_finds_its_bundled_data(self):
+        import subprocess
+        import tempfile
+        sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
+        import build_single_file
+        with tempfile.TemporaryDirectory() as t:
+            old = build_single_file.OUT
+            build_single_file.OUT = Path(t) / "dist"
+            try:
+                pyz = build_single_file.build()
+            finally:
+                build_single_file.OUT = old
+            inst = fakepack.make_fabric_instance(Path(t) / "inst")
+            r = subprocess.run([sys.executable, str(pyz), "analyze", str(inst), "-q", "--format", "json"],
+                               capture_output=True, text=True, cwd=t, timeout=120)
+            self.assertIn(r.returncode, (0, 1), r.stderr)  # 1 = errors found, which this broken sample has
+            doc = json.loads(r.stdout)
+            self.assertTrue(any(f["code"] == "rule_conflict" for f in doc["findings"]))  # rules.json was found inside
+            self.assertTrue(all(f["trace"] for f in doc["findings"]))

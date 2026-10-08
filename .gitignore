@@ -1,6 +1,7 @@
-__pycache__/
+
+*.egg-info/
 *.pyc
+.modpack_doctor/
+__pycache__/
 build/
 dist/
-*.egg-info/
-.modpack_doctor/
