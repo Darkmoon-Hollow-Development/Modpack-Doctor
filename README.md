@@ -1,5 +1,8 @@
 # Modpack Doctor
 
+> **Found a bug or have a suggestion?** All issues should be submitted at **https://relay.darkmoonhollow.xyz**
+> (not on GitHub). Include the exported report (**Export report...**) and your Minecraft version and loader.
+
 Scan a Minecraft modpack and find out what is wrong with it, why, and how to fix it, in one click.
 Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MIT).
 
