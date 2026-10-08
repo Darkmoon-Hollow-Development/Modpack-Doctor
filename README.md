@@ -21,24 +21,10 @@ Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MI
 
 ## Get it
 
-### Option 1: Windows installer (easiest)
-
-1. Open the project's **Releases** page on GitHub (right-hand side of the repository page, or add `/releases` to the repository address).
-2. Under the newest release, download **`ModpackDoctor-Setup-<version>.exe`**.
-3. Run it and follow the prompts. It installs for your user only (no administrator prompt) and adds a Start-menu entry and an
-   optional desktop shortcut.
-
-Windows SmartScreen may say "unknown publisher" because the installer is not code-signed. Click **More info**, then **Run anyway**.
-To remove the app later, use **Settings > Apps > Installed apps**. Your saved packs and settings are kept.
-
-*No release yet?* The maintainer publishes one by pushing a version tag (see [For maintainers](#for-maintainers)). Until then, use Option 2.
-
-### Option 2: Run it from the source (Windows, macOS, Linux)
-
 You need **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/). On Windows tick **"Add python.exe to PATH"**
-in the installer. Nothing else needs installing: the app uses only Python's standard library.
+in the Python installer. Nothing else needs installing: the app uses only Python's standard library.
 
-1. On the repository page click the green **Code** button, then **Download ZIP**, and unzip it.
+1. On this page click the green **Code** button, then **Download ZIP**, and unzip it anywhere.
    (Or, if you use Git: `git clone <repository address>`.)
 2. Start the app:
    - **Windows:** double-click **`ModpackDoctor.pyw`**.
@@ -49,12 +35,9 @@ in the installer. Nothing else needs installing: the app uses only Python's stan
 3. On Debian/Ubuntu Linux, install the window toolkit once first: `sudo apt install python3-tk`.
    Windows and macOS already include it.
 
-### Option 3: Install it as a command
-
-From the unzipped folder:
+Prefer a command? From the unzipped folder, `pip install .` adds a `modpack-doctor` command:
 
 ```
-pip install .
 modpack-doctor            # opens the app
 modpack-doctor analyze "C:\path\to\instance"
 ```
@@ -144,27 +127,12 @@ command line). Its lists are added to the built-in ones. Pull requests that exte
 
 ---
 
-## For maintainers
-
-**Publish a downloadable installer.** The workflow in `.github/workflows/windows-installer.yml` builds the Windows installer on
-GitHub's servers, so you do not need a Windows PC for this:
-
-1. Bump the version in `modpack_doctor/__init__.py` and `pyproject.toml`, and commit.
-2. Create and push a tag: `git tag v0.1.0` then `git push origin v0.1.0`.
-3. The **Actions** tab shows the build. When it finishes, the installer appears on the **Releases** page for everyone to download.
-   (You can also run the workflow by hand from the Actions tab; the installer is then attached to that run instead.)
-
-**Build it yourself on Windows:** install Python 3.11+, then double-click `build_windows.bat`. It builds the app with PyInstaller,
-installs Inno Setup via `winget` if needed, and writes `dist\ModpackDoctor-Setup-<version>.exe`.
-
-Packaging files: `ModpackDoctor.spec`, `installer/ModpackDoctor.iss`, `installer/ModpackDoctor.ico` (drawn by `tools/make_icon.py`),
-`build_windows.bat`.
-
-**Tests:**
+## For developers
 
 ```
 python -m unittest discover -s tests            # engine tests; GUI tests are skipped without tkinter and a display
 xvfb-run python -m unittest discover -s tests   # Linux: include the GUI tests
+python tools/make_icon.py                       # redraws the app icon (needs Pillow)
 ```
 
 ## License

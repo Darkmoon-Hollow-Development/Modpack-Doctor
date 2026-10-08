@@ -1,5 +1,5 @@
-"""Draws the Modpack Doctor icon (an original design) and writes installer/ModpackDoctor.ico plus
-modpack_doctor/data/icon.png (used for the window and taskbar). Needs Pillow; run: python tools/make_icon.py"""
+"""Draws the Modpack Doctor icon (an original design) and writes modpack_doctor/data/icon.png
+(used for the window and taskbar icon). Needs Pillow; run: python tools/make_icon.py"""
 from pathlib import Path
 from PIL import Image, ImageDraw
 
@@ -45,7 +45,4 @@ if __name__ == "__main__":
     png = big.resize((256, 256), Image.LANCZOS)
     (ROOT / "modpack_doctor" / "data").mkdir(exist_ok=True)
     png.save(ROOT / "modpack_doctor" / "data" / "icon.png")
-    png.save(ROOT / "installer" / "icon-preview.png")
-    sizes = [16, 24, 32, 48, 64, 128, 256]
-    big.save(ROOT / "installer" / "ModpackDoctor.ico", sizes=[(s, s) for s in sizes])
     print("icon written")
