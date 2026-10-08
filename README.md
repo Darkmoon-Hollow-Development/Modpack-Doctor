@@ -1,87 +1,110 @@
 # Modpack Doctor
 
-A desktop app (and command-line tool) that scans a Minecraft modpack and tells you what is wrong with it, why, and
-what to do about it. It supports **Forge, NeoForge, Fabric and Quilt** packs and has no dependencies beyond Python.
+Scan a Minecraft modpack and find out what is wrong with it, why, and how to fix it, in one click.
+Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MIT).
 
-## Run it
+![Modpack Doctor](screenshot.png)
 
-You need Python 3.11 or newer. On Windows and macOS, `tkinter` (the GUI toolkit) is included; on Debian/Ubuntu run
-`sudo apt install python3-tk` once.
+## What it does
+
+- Finds **missing or wrong-version dependencies**, mods built for the wrong Minecraft version or loader, **duplicate mods**
+  and **known conflicts** (for example OptiFine next to Sodium).
+- Spots **broken config files** and risky settings, and suggests **RAM** for the size of your pack.
+- Recommends **performance mods** you are missing (Sodium/Embeddium, Lithium, FerriteCore, ModernFix and friends).
+- Gives you a **health score** and a plain-language explanation for every problem.
+- **Auto-fix** applies the safe fixes for you. Mods are never deleted (they are renamed to `.jar.disabled`), config files
+  are backed up first, and everything can be **undone**.
+- Keeps several packs open in **tabs**, remembers them, and lets you **save packs** for one-click re-opening.
+- Light and dark mode.
+
+---
+
+## Get it
+
+### Option 1: Windows installer (easiest)
+
+1. Open the project's **Releases** page on GitHub (right-hand side of the repository page, or add `/releases` to the repository address).
+2. Under the newest release, download **`ModpackDoctor-Setup-<version>.exe`**.
+3. Run it and follow the prompts. It installs for your user only (no administrator prompt) and adds a Start-menu entry and an
+   optional desktop shortcut.
+
+Windows SmartScreen may say "unknown publisher" because the installer is not code-signed. Click **More info**, then **Run anyway**.
+To remove the app later, use **Settings > Apps > Installed apps**. Your saved packs and settings are kept.
+
+*No release yet?* The maintainer publishes one by pushing a version tag (see [For maintainers](#for-maintainers)). Until then, use Option 2.
+
+### Option 2: Run it from the source (Windows, macOS, Linux)
+
+You need **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/). On Windows tick **"Add python.exe to PATH"**
+in the installer. Nothing else needs installing: the app uses only Python's standard library.
+
+1. On the repository page click the green **Code** button, then **Download ZIP**, and unzip it.
+   (Or, if you use Git: `git clone <repository address>`.)
+2. Start the app:
+   - **Windows:** double-click **`ModpackDoctor.pyw`**.
+   - **Any system**, from a terminal opened inside the unzipped folder:
+     ```
+     python -m modpack_doctor
+     ```
+3. On Debian/Ubuntu Linux, install the window toolkit once first: `sudo apt install python3-tk`.
+   Windows and macOS already include it.
+
+### Option 3: Install it as a command
+
+From the unzipped folder:
 
 ```
-python -m modpack_doctor                     # opens the app
-python -m modpack_doctor gui "C:\path\to\instance"   # opens the app and loads a pack
+pip install .
+modpack-doctor            # opens the app
+modpack-doctor analyze "C:\path\to\instance"
 ```
 
-On Windows you can also double-click `ModpackDoctor.pyw`. Want to try it safely first?
+---
 
-```
-python tools/make_demo_pack.py demo-pack     # creates a deliberately broken sample instance
-python -m modpack_doctor gui demo-pack
-```
+## How to use it
 
-## What you can open
+1. **Open a pack.** Click **Instance folder...** and pick your modpack's folder (the one that contains `mods`), or
+   **Pack file...** for a downloaded `.mrpack` or CurseForge `.zip`. You can also paste a path into the box.
+2. Press **Analyze** (or **F5**). Every problem is listed with its severity: *Error* (will probably crash), *Warning*, or *Tip*.
+3. **Click a problem** to read what it means and what to do. Buttons under the explanation fix that one thing.
+4. Or press **Auto-fix pack** to apply all the safe fixes at once. It tells you what it will do and asks first, then re-checks the pack.
+5. Not happy with the result? Press **Undo last fix**. An Auto-fix run is undone as one step.
+6. Use **Export report...** to save the findings as Markdown, text or JSON, for example to share when asking for help.
+
+**Where to find your instance folder:**
+
+| Launcher | Folder |
+|---|---|
+| Prism / MultiMC | right-click the instance > **Folder** (then pick `.minecraft` or the folder above it) |
+| CurseForge app | instance > **...** > **Open Folder** |
+| Modrinth app | instance > **Open folder** |
+| Server | the folder with `mods` next to `server.properties` |
+
+### What you can open
 
 | Input | Notes |
 |---|---|
-| **Instance folder** | Prism, MultiMC, CurseForge app, Modrinth app, a server folder, or any folder with `mods/` in it. Minecraft version, loader and RAM are read from the launcher's files when present. |
-| **Modrinth `.mrpack`** | Mods are downloaded from the hosts the pack format allows, checked against the hashes in the pack, and analysed. |
-| **CurseForge pack `.zip`** | These only *list* mods, so downloading them needs a free API key from console.curseforge.com (paste it in the app; it is never saved). Without a key, only mods bundled in the pack are analysed, and the app says so. Authors who disable third-party downloads must be fetched manually. |
+| **Instance folder** | Any folder with `mods/` in it. Minecraft version, loader and RAM are read from the launcher's files when present. |
+| **Modrinth `.mrpack`** | Mods are downloaded from the hosts the format allows, checked against the pack's hashes, and analysed. |
+| **CurseForge pack `.zip`** | These only *list* mods, so downloading them needs a free API key from [console.curseforge.com](https://console.curseforge.com) (paste it into the app; it is never saved). Without a key only the mods bundled in the pack are analysed, and the app says so. |
 
-Packs are unpacked into `~/ModpackDoctor/workspaces/`; your original file is never changed.
+Packs from files are unpacked into `~/ModpackDoctor/workspaces/`. Your original file is never changed.
 
-## What it checks
+### Tabs and saved packs
 
-- **Dependencies:** missing required mods, wrong dependency versions, wrong Minecraft or loader version, recommended
-  companions, and libraries bundled inside other jars (jar-in-jar) are understood.
-- **Loader problems:** mods built for another loader (Sinytra Connector is recognised and downgrades Fabric-on-Forge to a warning).
-- **Conflicts:** incompatibilities the mods declare themselves, duplicate mod ids, and a built-in list of known
-  clashes and redundant mods (OptiFine vs Sodium family, Sodium/Embeddium/Rubidium, Phosphor vs Starlight, several
-  recipe viewers or minimaps).
-- **Client/server:** client-only mods in a server pack.
-- **Configs:** `.toml`/`.json` files in `config/` that do not parse, server view/simulation distance in big packs, and
-  RAM guidance for the pack's size.
-- **Performance suggestions:** missing optimizers such as Sodium/Embeddium, Lithium, FerriteCore and ModernFix.
-- **Updates (optional, uses the internet):** asks Modrinth for newer builds and for replacements of mods that don't fit the pack.
+- Every pack opens in its own **tab** with its own results and undo history. **Ctrl+T** new tab, **Ctrl+W** close,
+  **Ctrl+Shift+T** reopen a closed tab, **Ctrl+Tab** switch, **Ctrl+1..9** jump. Right-click a tab to rename or duplicate it.
+- Your tabs **come back when you reopen the app** (File > *Reopen my tabs on startup* turns this off).
+- **Saved packs** (button next to *Pack file...*, or **Ctrl+D**) remembers a pack and its settings under a name you choose.
+  A **Recent** list keeps the last ten.
+- **Mods / Config / Pack** buttons (left panel, **Ctrl+M** and **Ctrl+Shift+C**) open those folders in your file manager.
 
-Every finding has a plain-language explanation. The **health score** is a quick summary (errors weigh more than
-warnings); it is not a guarantee that the game will launch.
+### Options
 
-## Fixing
+Leave **Minecraft**, **Loader** and **Pack is for** on *auto* unless the result looks wrong. Tick **Check Modrinth for updates**
+to also look for newer builds and replacements online. Choose **System / Light / Dark** with the *Theme* box.
 
-- **Auto-fix pack** (button next to *Analyze*, also under Tools): applies every recommended fix in one go. It shows what
-  it is about to do and asks once, then re-checks the pack and repeats (up to 3 rounds) while more can be fixed safely.
-  If nothing is loaded yet it scans first. Afterwards it reports the before/after health score and anything left that
-  needs your decision. Some recommended fixes download a missing library from Modrinth; failures are reported, not hidden.
-- **Jump to the files:** *Mods folder* and *Config folder* buttons (left panel, Tools menu, right-click on a tab; Ctrl+M and
-  Ctrl+Shift+C) open them in Explorer/Finder. They work as soon as a local folder is chosen, before any scan.
-- Or fix things one at a time: click a finding, then a button under *What you can do*.
-- Mods are **never deleted**: "disable" renames `x.jar` to `x.jar.disabled`.
-- Edited config files are backed up first; everything goes into `.modpack_doctor/` inside the instance.
-- **Undo last fix** reverses the most recent run, and an Auto-fix run is undone as a whole. Downloads only come from
-  Modrinth and are hash-verified.
-
-## Light and dark mode
-
-Pick **System**, **Light** or **Dark** with the *Theme* selector in the options box (or View > Theme). *System* follows
-Windows/macOS; your choice is remembered. On Windows the menu bar at the very top stays in the system colours.
-
-## Tabs and saved packs
-
-- **Tabs:** every pack opens in its own tab, so you can keep several packs side by side. Each tab keeps its own
-  results, filters, undo history and options. **Ctrl+T** new tab, **Ctrl+W** close, **Ctrl+Shift+T** reopen a closed
-  tab, **Ctrl+Tab** / **Ctrl+Shift+Tab** switch, **Ctrl+1..9** jump. Right-click a tab to rename, duplicate, save or
-  close others; middle-click closes. A dot on a tab means a scan finished while you were looking at another tab.
-- **Your tabs come back:** when you start the app again, the tabs you had open reopen (File > *Reopen my tabs on
-  startup* turns this off). Reopened tabs are not rescanned until you press Analyze, except the active tab when it is a
-  local folder.
-- **Saved packs:** *Saved packs* (next to the folder buttons, also under File, **Ctrl+D**) remembers a folder or pack
-  file together with its Minecraft version / loader / side settings under a name you choose. Saved packs show a star
-  on their tab, open in one click and are scanned straight away when they are local folders. *Manage saved packs...*
-  renames and removes them. A *Recent* list remembers the last ten packs you opened.
-- Everything is stored in `~\.modpack_doctor` (`tabs.json`, `library.json`). The CurseForge API key is never saved.
-- Only one scan or fix runs at a time; you can switch tabs meanwhile and the result lands in the tab it belongs to.
-- From the command line: `python -m modpack_doctor gui "C:\packs\one" "C:\packs\two"` opens one tab each.
+---
 
 ## Command line
 
@@ -89,47 +112,61 @@ Windows/macOS; your choice is remembered. On Windows the menu bar at the very to
 python -m modpack_doctor analyze <folder|.mrpack|.zip> [--format text|markdown|json] [--out report.md] [--online]
 python -m modpack_doctor fix <folder> [--yes]
 python -m modpack_doctor undo <folder>
+python -m modpack_doctor gui <folder> [<folder> ...]      # opens the app, one tab per pack
 ```
 
-`analyze` exits with code 1 when errors are found, so it can be used in CI.
+`analyze` exits with code 1 when errors are found, so it works in CI. Try it safely on a deliberately broken sample pack:
 
-## Teaching it more
+```
+python tools/make_demo_pack.py demo-pack
+python -m modpack_doctor gui demo-pack
+```
 
-Compatibility knowledge lives in `modpack_doctor/data/rules.json` (known conflicts, redundant mods, recommended mods,
-config value rules, RAM tiers). Add your own in a separate JSON file and pick it under *Extra rules file* in the app
-(or `--rules` on the command line); its lists are appended to the built-in ones.
+## Safety
 
-## Limits worth knowing
+- Mods are **never deleted**, only renamed to `.jar.disabled` (rename back to restore).
+- Edited config files are backed up first. All changes are logged in `.modpack_doctor/` inside the instance and can be undone.
+- Downloads happen only from Modrinth and are hash-verified. Nothing is uploaded anywhere.
+- Your CurseForge API key is never saved.
 
-- It reads mod **metadata**; it cannot detect every crash (for example mixin conflicts or code-level incompatibilities
-  that no mod declares). Treat a clean result as "no known problems", not "will run".
-- Config analysis is rule-based: syntax checks plus the value rules in `rules.json`. It does not understand every
-  mod's settings, so extend the rules for the mods your packs use.
+## Limits
+
+- It reads mod **metadata**. It cannot detect every crash (for example mixin conflicts or code-level incompatibilities
+  that no mod declares). Read a clean result as "no known problems", not "will run".
+- Config checks are rule-based (syntax plus the value rules in `rules.json`) and do not understand every mod's settings.
 - The built-in known-conflict list is a starter set.
 
-## Windows installer
+## Teach it more
 
-The packaging files are ready, but the installer has to be built on Windows (PyInstaller cannot cross-compile).
+Compatibility knowledge lives in `modpack_doctor/data/rules.json` (known conflicts, redundant mods, recommended mods, config
+rules, RAM tiers). Add your own in a separate JSON file and pick it under *Extra rules file* in the app (or `--rules` on the
+command line). Its lists are added to the built-in ones. Pull requests that extend `rules.json` are welcome.
 
-**Easiest: on a Windows PC**, install Python 3.11+ (tick "Add python.exe to PATH"), then double-click
-`build_windows.bat` in this folder. It builds the program with PyInstaller, installs Inno Setup through `winget` if it
-is missing, and produces `dist\ModpackDoctor-Setup-<version>.exe`.
+---
 
-**Or on GitHub:** push this folder to a repository and run the *Windows installer* workflow (Actions tab, or push a
-tag like `v0.1.0`). It runs the tests, builds the installer and attaches it as a downloadable artifact.
+## For maintainers
 
-What you get: a per-user installer (no admin prompt), a Start-menu entry, an optional desktop shortcut and a normal
-uninstaller. Your settings (`~\.modpack_doctor`) and unpacked packs (`~\ModpackDoctor`) are left alone on uninstall.
-The installer is unsigned, so Windows SmartScreen may show "unknown publisher" (More info, then Run anyway); removing
-that needs a code-signing certificate.
+**Publish a downloadable installer.** The workflow in `.github/workflows/windows-installer.yml` builds the Windows installer on
+GitHub's servers, so you do not need a Windows PC for this:
 
-Files: `ModpackDoctor.spec` (PyInstaller), `installer/ModpackDoctor.iss` (Inno Setup), `installer/ModpackDoctor.ico` (drawn by `tools/make_icon.py`, which also writes the window icon `modpack_doctor/data/icon.png`),
-`build_windows.bat`, `.github/workflows/windows-installer.yml`. Bump the version in `modpack_doctor/__init__.py`
-and `pyproject.toml`; the installer picks it up automatically.
+1. Bump the version in `modpack_doctor/__init__.py` and `pyproject.toml`, and commit.
+2. Create and push a tag: `git tag v0.1.0` then `git push origin v0.1.0`.
+3. The **Actions** tab shows the build. When it finishes, the installer appears on the **Releases** page for everyone to download.
+   (You can also run the workflow by hand from the Actions tab; the installer is then attached to that run instead.)
 
-## Tests
+**Build it yourself on Windows:** install Python 3.11+, then double-click `build_windows.bat`. It builds the app with PyInstaller,
+installs Inno Setup via `winget` if needed, and writes `dist\ModpackDoctor-Setup-<version>.exe`.
+
+Packaging files: `ModpackDoctor.spec`, `installer/ModpackDoctor.iss`, `installer/ModpackDoctor.ico` (drawn by `tools/make_icon.py`),
+`build_windows.bat`.
+
+**Tests:**
 
 ```
-python -m unittest discover -s tests          # engine tests (the GUI tests are skipped without tkinter/a display)
-xvfb-run python -m unittest discover -s tests # Linux: include the GUI tests
+python -m unittest discover -s tests            # engine tests; GUI tests are skipped without tkinter and a display
+xvfb-run python -m unittest discover -s tests   # Linux: include the GUI tests
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
