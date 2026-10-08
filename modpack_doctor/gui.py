@@ -104,6 +104,7 @@ class App(tk.Tk):
         self.title("Modpack Doctor")
         self.geometry("1180x800")
         self.minsize(960, 640)
+        self._set_icon()
 
         self.settings = vm.load_settings()
         self.base_rules = load_rules()
@@ -298,6 +299,21 @@ class App(tk.Tk):
         self._save_settings()
         self.status_var.set(f"Theme: {self.theme_var.get()}")
 
+    def _set_icon(self) -> None:
+        """Window, taskbar and Alt-Tab icon. Purely cosmetic, so any failure is ignored."""
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ModpackDoctor.App")  # own taskbar group
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            png = Path(__file__).parent / "data" / "icon.png"
+            self._icon_img = tk.PhotoImage(file=str(png))  # keep a reference or Tk drops it
+            self.iconphoto(True, self._icon_img)
+        except Exception:  # noqa: BLE001
+            pass
+
     # ------------------------------------------------------------------ menu / header
     def _build_menu(self) -> None:
         m = tk.Menu(self)
@@ -317,6 +333,9 @@ class App(tk.Tk):
         t.add_command(label="Undo last fix", command=self.undo_last)
         t.add_separator()
         t.add_command(label="Open analysed folder", command=self.open_folder)
+        t.add_command(label="Open mods folder", accelerator="Ctrl+M", command=lambda: self.open_pack_folder("mods"))
+        t.add_command(label="Open config folder", accelerator="Ctrl+Shift+C",
+                      command=lambda: self.open_pack_folder("config"))
         m.add_cascade(label="Tools", menu=t)
         tm = tk.Menu(m, tearoff=False)
         tm.configure(postcommand=lambda: self._fill_tabs_menu(tm))
@@ -342,6 +361,7 @@ class App(tk.Tk):
         head.columnconfigure(1, weight=1)
         ttk.Label(head, text="Modpack").grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.src_entry = ttk.Entry(head, textvariable=self.src_var)
+        self.src_entry.bind("<KeyRelease>", lambda e: self._refresh_buttons())  # folder buttons follow what is typed
         self.src_entry.grid(row=0, column=1, sticky="ew")
         ttk.Button(head, text="Instance folder...", command=self.pick_folder).grid(row=0, column=2, padx=(8, 0))
         ttk.Button(head, text="Pack file...", command=self.pick_file).grid(row=0, column=3, padx=(6, 0))
@@ -419,6 +439,13 @@ class App(tk.Tk):
         self.export_btn.pack(fill="x", pady=(6, 0))
         self.folder_btn = ttk.Button(box, text="Open analysed folder", command=self.open_folder)
         self.folder_btn.pack(fill="x", pady=(6, 0))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=(6, 0))
+        row.columnconfigure((0, 1), weight=1, uniform="fold")
+        self.mods_btn = ttk.Button(row, text="Mods folder", command=lambda: self.open_pack_folder("mods"))
+        self.mods_btn.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.config_btn = ttk.Button(row, text="Config folder", command=lambda: self.open_pack_folder("config"))
+        self.config_btn.grid(row=0, column=1, sticky="ew", padx=(3, 0))
         self._draw_gauge(None)
 
     def _draw_gauge(self, score: Optional[int]) -> None:
@@ -553,6 +580,8 @@ class App(tk.Tk):
         self.bind("<Control-o>", lambda e: self.pick_folder())
         self.bind("<Control-O>", lambda e: self.pick_file())
         self.bind("<Control-s>", lambda e: self.export())
+        self.bind("<Control-m>", lambda e: self.open_pack_folder("mods"))
+        self.bind("<Control-C>", lambda e: self.open_pack_folder("config"))
         self.src_entry.bind("<Return>", lambda e: self.analyze())
         for seq, fn in (("<Control-t>", self.new_tab), ("<Control-w>", self.close_tab), ("<Control-T>", self.reopen_closed_tab),
                         ("<Control-d>", self.save_pack), ("<Control-Tab>", lambda: self.cycle_tab(1)),
@@ -634,12 +663,14 @@ class App(tk.Tk):
     def _tab_context_menu(self, tab: Tab, event) -> None:
         m = tk.Menu(self, tearoff=False)
         self._style_menu(m)
-        has_root = tab.result is not None and tab.result.pack.root is not None
         m.add_command(label="Rename...", command=lambda: self.rename_tab(tab))
         m.add_command(label="Duplicate", command=lambda: self.duplicate_tab(tab))
         m.add_command(label="Save pack...", command=lambda: self.save_pack(tab))
-        m.add_command(label="Open pack folder", state="normal" if has_root else "disabled",
-                      command=lambda: open_in_file_manager(tab.result.pack.root))
+        folders = vm.pack_folders(tab.result, tab.source)
+        for key, label in (("pack", "Open pack folder"), ("mods", "Open mods folder"),
+                           ("config", "Open config folder")):
+            m.add_command(label=label, state="normal" if key in folders else "disabled",
+                          command=lambda k=key: self.open_pack_folder(k, tab))
         m.add_separator()
         m.add_command(label="Close", command=lambda: self.close_tab(tab))
         m.add_command(label="Close other tabs", state="normal" if len(self.tabs) > 1 else "disabled",
@@ -1284,6 +1315,11 @@ class App(tk.Tk):
         self._set_menu(self.menu_tools, "Auto-fix pack", idle)
         self._set_menu(self.menu_tools, "Undo last fix", has_undo)
         self._set_menu(self.menu_tools, "Open analysed folder", has)
+        folders = vm.pack_folders(res, self.src_var.get())
+        self.mods_btn.state(["!disabled"] if "mods" in folders else ["disabled"])
+        self.config_btn.state(["!disabled"] if "config" in folders else ["disabled"])
+        self._set_menu(self.menu_tools, "Open mods folder", "mods" in folders)
+        self._set_menu(self.menu_tools, "Open config folder", "config" in folders)
         self._set_menu(self.menu_file, "Export report...", has and idle)
         self._set_menu(self.menu_file, "Copy report as Markdown", has)
         for b in self.fix_frame.winfo_children():
@@ -1539,6 +1575,23 @@ class App(tk.Tk):
         self.clipboard_clear()
         self.clipboard_append(vm.render_report(self.result, "md"))
         self.status_var.set("Report copied to the clipboard as Markdown.")
+
+    def open_pack_folder(self, which: str, tab: Optional[Tab] = None) -> None:
+        """Open the pack's ``mods`` / ``config`` / pack folder in Explorer (Finder, file manager)."""
+        tab = tab or self.tab
+        if tab is self.tab:
+            self._capture_active()
+        res = tab.result
+        folders = vm.pack_folders(res, tab.source)
+        if which in folders:
+            open_in_file_manager(folders[which])
+        elif folders:
+            what = {"config": "config folder", "mods": "mods folder", "pack": "folder"}.get(which, which)
+            messagebox.showinfo("Modpack Doctor", f"This pack has no {what} (yet). The game creates "
+                                "config files the first time it runs with the mods.")
+        else:
+            messagebox.showinfo("Modpack Doctor", "Open a folder or scan a pack first. Packs that are only a "
+                                ".mrpack/.zip are unpacked when scanned.")
 
     def open_folder(self) -> None:
         if self.result is not None and self.result.pack.root is not None:

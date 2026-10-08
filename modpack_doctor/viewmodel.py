@@ -486,3 +486,29 @@ def add_recent(lib: Library, source: str, limit: int = MAX_RECENT) -> None:
     key = norm_source(source)
     lib.recent = [source] + [r for r in lib.recent if norm_source(r) != key]
     del lib.recent[limit:]
+
+
+# ---------------------------------------------------------------------------- pack folders
+def pack_folders(result: Optional[AnalysisResult] = None, source: str = "") -> dict:
+    """The folders worth jumping to for a pack: ``{"pack": Path, "mods": Path, "config": Path}``.
+
+    Taken from the scan result when there is one, otherwise worked out from a local source folder.
+    Only folders that exist are included (a pack with no ``config`` yet simply has no "config" key).
+    """
+    root = mods = None
+    if result is not None and result.pack.root is not None:
+        root, mods = result.pack.root, result.pack.mods_dir
+    elif source.strip():
+        from .sources import SourceError, find_instance_root
+        try:
+            root, mods = find_instance_root(Path(source.strip().strip('"')).expanduser())
+        except (SourceError, OSError):
+            return {}
+    out: dict = {}
+    for key, path in (("pack", root), ("mods", mods), ("config", root / "config" if root else None)):
+        try:
+            if path is not None and Path(path).is_dir():
+                out[key] = Path(path)
+        except OSError:
+            pass
+    return out

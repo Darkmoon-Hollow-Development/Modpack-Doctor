@@ -53,6 +53,8 @@ warnings); it is not a guarantee that the game will launch.
   it is about to do and asks once, then re-checks the pack and repeats (up to 3 rounds) while more can be fixed safely.
   If nothing is loaded yet it scans first. Afterwards it reports the before/after health score and anything left that
   needs your decision. Some recommended fixes download a missing library from Modrinth; failures are reported, not hidden.
+- **Jump to the files:** *Mods folder* and *Config folder* buttons (left panel, Tools menu, right-click on a tab; Ctrl+M and
+  Ctrl+Shift+C) open them in Explorer/Finder. They work as soon as a local folder is chosen, before any scan.
 - Or fix things one at a time: click a finding, then a button under *What you can do*.
 - Mods are **never deleted**: "disable" renames `x.jar` to `x.jar.disabled`.
 - Edited config files are backed up first; everything goes into `.modpack_doctor/` inside the instance.
@@ -121,7 +123,7 @@ uninstaller. Your settings (`~\.modpack_doctor`) and unpacked packs (`~\ModpackD
 The installer is unsigned, so Windows SmartScreen may show "unknown publisher" (More info, then Run anyway); removing
 that needs a code-signing certificate.
 
-Files: `ModpackDoctor.spec` (PyInstaller), `installer/ModpackDoctor.iss` (Inno Setup), `installer/ModpackDoctor.ico`,
+Files: `ModpackDoctor.spec` (PyInstaller), `installer/ModpackDoctor.iss` (Inno Setup), `installer/ModpackDoctor.ico` (drawn by `tools/make_icon.py`, which also writes the window icon `modpack_doctor/data/icon.png`),
 `build_windows.bat`, `.github/workflows/windows-installer.yml`. Bump the version in `modpack_doctor/__init__.py`
 and `pyproject.toml`; the installer picks it up automatically.
 

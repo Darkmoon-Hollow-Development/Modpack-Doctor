@@ -354,3 +354,24 @@ class ArchiveReanalyzeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PackFoldersTests(unittest.TestCase):
+    def test_folders_from_source_and_result(self):
+        import tempfile
+        from pathlib import Path
+        import fakepack
+        from modpack_doctor import pipeline, viewmodel as vm
+        with tempfile.TemporaryDirectory() as t:
+            inst = fakepack.make_fabric_instance(Path(t) / "inst")
+            f = vm.pack_folders(None, str(inst))
+            self.assertIn("config", f)
+            self.assertTrue(f["mods"].is_dir() and f["mods"].name == "mods")
+            from modpack_doctor.sources import Options
+            res = pipeline.run_analysis(str(inst), Options())
+            self.assertEqual(vm.pack_folders(res)["mods"], res.pack.mods_dir)
+            self.assertEqual(vm.pack_folders(None, ""), {})
+            self.assertEqual(vm.pack_folders(None, str(Path(t) / "nope")), {})
+            import shutil
+            shutil.rmtree(inst / "config", ignore_errors=True)
+            self.assertNotIn("config", vm.pack_folders(None, str(inst)))

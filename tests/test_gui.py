@@ -70,6 +70,23 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(self.app.tree.selection())
         self.assertTrue(self.app.detail.get("1.0", "end").strip())
 
+    def test_folder_buttons_and_icon(self):
+        self.assertTrue(self.app.iconphoto)  # window icon was set without error
+        self.assertTrue((Path(self.gui.__file__).parent / "data" / "icon.png").is_file())
+        self.app.update()
+        self.assertNotIn("disabled", self.app.mods_btn.state())  # known from the source folder before any scan
+        opened = []
+        with mock.patch.object(self.gui, "open_in_file_manager", side_effect=opened.append):
+            self.app.open_pack_folder("mods")
+            self.app.open_pack_folder("config")
+        self.assertEqual([p.name for p in opened], ["mods", "config"])
+        self.app.src_var.set("")
+        self.app._refresh_buttons()
+        self.assertIn("disabled", self.app.config_btn.state())
+        with mock.patch.object(self.gui.messagebox, "showinfo") as info:
+            self.app.open_pack_folder("mods")
+        self.assertTrue(info.called)
+
     def test_filters(self):
         self.analyze()
         total = len(self.app.tree.get_children())
