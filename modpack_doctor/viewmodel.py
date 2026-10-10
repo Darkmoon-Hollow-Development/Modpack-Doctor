@@ -204,6 +204,53 @@ def export_report(result: AnalysisResult, path: str) -> None:
     Path(path).write_text(render_report(result, format_for_path(path)), encoding="utf-8")
 
 
+def render_mod_list(result: AnalysisResult, fmt: str = "csv") -> str:
+    """The mod table as CSV (opens in Excel) or a Markdown table (for forum posts / GitHub)."""
+    import csv
+    import io
+    rows = sort_mod_rows(mod_rows(result), "name")
+    head = ["Name", "Mod id", "Version", "Loader", "Side", "File", "Issue"]
+    data = [[r.name, r.mod_id, r.version, r.loader, r.side, r.file, r.issue] for r in rows]
+    if fmt in ("md", "markdown"):
+        esc = lambda v: str(v).replace("|", "\\|").replace("\n", " ")  # noqa: E731
+        out = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+        out += ["| " + " | ".join(esc(c) for c in row) + " |" for row in data]
+        return "\n".join(out) + "\n"
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(head)
+    w.writerows(data)
+    return buf.getvalue()
+
+
+def export_mod_list(result: AnalysisResult, path: str) -> int:
+    fmt = "md" if Path(path).suffix.lower() in (".md", ".markdown") else "csv"
+    # utf-8-sig so Excel on Windows reads accented mod names correctly
+    Path(path).write_text(render_mod_list(result, fmt), encoding="utf-8-sig" if fmt == "csv" else "utf-8")
+    return len(mod_rows(result))
+
+
+SHORTCUTS = (
+    ("F5", "Analyze"),
+    ("Ctrl+O", "Open instance folder"),
+    ("Ctrl+Shift+O", "Open pack file (.mrpack / .zip)"),
+    ("Ctrl+S", "Export report"),
+    ("Ctrl+M", "Open mods folder"),
+    ("Ctrl+Shift+C", "Open config folder"),
+    ("Ctrl+D", "Save this pack"),
+    ("Ctrl+T", "New tab"),
+    ("Ctrl+W", "Close tab"),
+    ("Ctrl+Shift+T", "Reopen closed tab"),
+    ("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous tab"),
+    ("Ctrl+L", "Analyze the latest crash report"),
+)
+
+
+def shortcuts_text() -> str:
+    width = max(len(k) for k, _ in SHORTCUTS)
+    return "\n".join(f"{k.ljust(width)}   {v}" for k, v in SHORTCUTS)
+
+
 # ----------------------------------------------------------------------- settings
 
 def settings_path() -> Path:

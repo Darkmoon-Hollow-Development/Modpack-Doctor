@@ -62,6 +62,22 @@ modpack-doctor analyze "C:\path\to\instance"
 5. Not happy with the result? Press **Undo last fix**. An Auto-fix run is undone as one step.
 6. Use **Export report...** to save the findings as Markdown, text or JSON, for example to share when asking for help.
 
+### After a crash
+
+Open the **Crash log** tab (or press **Ctrl+L**) and click **Analyze latest crash**. It reads the newest file in the
+pack's `crash-reports` folder (or `logs/latest.log`) and explains in plain words what went wrong: the suspected mod, missing
+or wrong-version dependencies, a Mixin that failed, out-of-memory, or a Java version that is too old. Mods it can match to a
+jar get a **Disable** button. Use **Open a crash file...** to read any report you have saved, or **Paste text or link...** to analyze a crash that
+a player sent you: paste the report or log text, or an `mclo.gs` link (only `api.mclo.gs` is contacted, and only then). It understands the common
+Forge, NeoForge, Fabric and Quilt formats; treat the result as a strong hint, not proof.
+
+### Disabled mods, mod lists
+
+- **Tools > Manage disabled mods...** lists every `.jar.disabled` file and turns the ones you pick back on. It can be undone
+  like any other fix, and it never overwrites a jar that already exists.
+- **Export list...** on the Mods tab (or **File > Export mod list...**) saves the mod table as CSV (opens in Excel) or a
+  Markdown table for forum posts. **Help > Keyboard shortcuts** shows every shortcut.
+
 **Where to find your instance folder:**
 
 | Launcher | Folder |
@@ -141,6 +157,8 @@ python -m modpack_doctor gui demo-pack
 
 - It reads mod **metadata**. It cannot detect every crash (for example mixin conflicts or code-level incompatibilities
   that no mod declares). Read a clean result as "no known problems", not "will run".
+- Crash analysis only recognises the formats listed above; a crash with no named mod gets an honest "nothing points at a
+  specific mod" rather than a guess.
 - Config checks are rule-based (syntax plus the value rules in `rules.json`) and do not understand every mod's settings.
 - The built-in known-conflict list is a starter set.
 

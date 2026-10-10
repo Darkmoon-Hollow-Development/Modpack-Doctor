@@ -138,6 +138,38 @@ def _disable(root: Path, params: dict) -> dict:
     return {"op": "disable", "from": _rel(root, src), "to": _rel(root, dst)}
 
 
+_DISABLED_RE = re.compile(r"^(?P<base>.+?\.jar)\.disabled\d*$", re.I)
+
+
+def list_disabled(root: Path) -> list:
+    """Jars that were disabled by renaming (``x.jar.disabled``), as relative paths."""
+    root = Path(root)
+    out = []
+    mods = root / "mods"
+    if not mods.is_dir():
+        return out
+    for dirpath, dirnames, filenames in os.walk(mods):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for fn in sorted(filenames):
+            if _DISABLED_RE.match(fn):
+                out.append((Path(dirpath) / fn).relative_to(root).as_posix())
+    return out
+
+
+def _enable(root: Path, params: dict) -> dict:
+    src = _safe(root, params["file"])
+    if not src.is_file():
+        raise FixError(f"File not found (already changed?): {params['file']}")
+    m = _DISABLED_RE.match(src.name)
+    if not m:
+        raise FixError(f"Not a disabled jar: {params['file']}")
+    dst = src.with_name(m.group("base"))
+    if dst.exists():
+        raise FixError(f"Cannot enable {src.name}: {dst.name} already exists")
+    src.rename(dst)
+    return {"op": "enable", "from": _rel(root, src), "to": _rel(root, dst)}
+
+
 def _download_to(root: Path, cs_id: str, params: dict, dest_dir: Path) -> Path:
     url = params["url"]
     fname = safe_filename(params["filename"], "mod.jar")
@@ -258,6 +290,8 @@ def apply_actions(root: Path, actions: list, progress: Optional[Callable] = None
             k, p = a.kind, a.params
             if k == "disable_mod":
                 entries.append(_disable(root, p))
+            elif k == "enable_mod":
+                entries.append(_enable(root, p))
             elif k == "ignore_finding":
                 entries.append(_ignore(root, p))
             elif k == "edit_config":
@@ -283,12 +317,19 @@ def apply_actions(root: Path, actions: list, progress: Optional[Callable] = None
 def list_changesets(root: Path) -> list:
     sdir = Path(root) / STATE_DIR / "changesets"
     out = []
-    for f in sorted(sdir.glob("*.json")) if sdir.is_dir() else []:
+    for f in sdir.glob("*.json") if sdir.is_dir() else []:
         try:
             out.append(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             continue
-    return out
+
+    def order(cs: dict) -> tuple:  # "…-120000" then "…-120000-2": plain string sorting would put -2 first
+        stamp, _, extra = str(cs.get("id", "")).rpartition("-")
+        if extra.isdigit() and len(extra) < 6 and stamp.count("-") >= 1:
+            return (stamp, int(extra))
+        return (str(cs.get("id", "")), 1)
+
+    return sorted(out, key=order)
 
 
 def undo(root: Path, cs_id: Optional[str] = None) -> dict:
@@ -307,6 +348,11 @@ def undo(root: Path, cs_id: Optional[str] = None) -> dict:
                 src, dst = _safe(root, e["from"]), _safe(root, e["to"])
                 if src.exists():
                     raise FixError(f"Cannot restore {e['from']}: a file with that name exists")
+                dst.rename(src)
+            elif e["op"] == "enable":
+                src, dst = _safe(root, e["from"]), _safe(root, e["to"])
+                if src.exists():
+                    raise FixError(f"Cannot disable {e['to']} again: {e['from']} exists")
                 dst.rename(src)
             elif e["op"] == "install":
                 p = _safe(root, e["path"])

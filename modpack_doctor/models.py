@@ -69,7 +69,7 @@ class JarInfo:
 @dataclass
 class Action:
     """One concrete change. ``kind`` is one of:
-    disable_mod, install_project, install_mod, replace_mod, edit_config."""
+    disable_mod, enable_mod, install_project, install_mod, replace_mod, edit_config, ignore_finding."""
 
     kind: str
     params: dict = field(default_factory=dict)

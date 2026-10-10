@@ -88,6 +88,89 @@ class GuiTests(unittest.TestCase):
             self.app.open_pack_folder("mods")
         self.assertTrue(info.called)
 
+    def test_crash_tab_analyzes_and_disables(self):
+        self.analyze()
+        cr = self.inst / "crash-reports"
+        cr.mkdir()
+        (cr / "crash-1.txt").write_text(
+            "---- Minecraft Crash Report ----\nDescription: boom\n\njava.lang.IllegalStateException: x\n\n"
+            "-- System Details --\nDetails:\n\tSuspected Mod(s): Sodium (sodium), Version: 0.5.3\n")
+        self.app.analyze_crash()
+        self.app.update()
+        text = self.app.crash_text.get("1.0", "end")
+        self.assertIn("crash-1.txt", text)
+        self.assertIn("mods/sodium-0.5.3.jar", text)
+        self.assertEqual(len(self.app.crash_fix_frame.winfo_children()), 1)
+        # the result belongs to the tab: switching away and back keeps it
+        self.app.new_tab()
+        self.assertIn("Analyze latest crash", self.app.crash_text.get("1.0", "end"))
+        self.app.switch_to(self.app.tabs[0])
+        self.assertIn("crash-1.txt", self.app.crash_text.get("1.0", "end"))
+        with mock.patch.object(self.gui.messagebox, "askokcancel", return_value=True), \
+                mock.patch.object(self.gui.messagebox, "showinfo"), mock.patch.object(self.gui.messagebox, "showwarning"):
+            self.app.crash_fix_frame.winfo_children()[0].invoke()
+            self.wait()
+        self.assertTrue((self.inst / "mods" / "sodium-0.5.3.jar.disabled").is_file())
+
+    def test_paste_crash_text(self):
+        self.analyze()
+        with mock.patch.object(self.app, "clipboard_get", return_value="---- Minecraft Crash Report ----\n"
+                               "\tSuspected Mod(s): Iris (iris), Version: 1.6.4\n"):
+            self.app.paste_crash()
+        win = [w for w in self.app.winfo_children() if isinstance(w, self.gui.tk.Toplevel)][-1]
+        self.assertIn("Suspected", win.text.get("1.0", "end"))  # pre-filled from the clipboard
+        win.analyze_btn.invoke()
+        self.app.update()
+        text = self.app.crash_text.get("1.0", "end")
+        self.assertIn("pasted text", text)
+        self.assertIn("mods/iris-1.6.4.jar", text)
+        self.assertEqual(len(self.app.crash_fix_frame.winfo_children()), 1)
+
+    def test_paste_crash_link_failure_is_reported(self):
+        from modpack_doctor import net
+        with mock.patch.object(self.gui.crashlog, "fetch_shared", side_effect=net.NetError("offline")), \
+                mock.patch.object(self.gui.messagebox, "showerror") as err:
+            self.app.paste_crash()
+            win = [w for w in self.app.winfo_children() if isinstance(w, self.gui.tk.Toplevel)][-1]
+            win.text.delete("1.0", "end")
+            win.text.insert("1.0", "https://mclo.gs/AbC123x")
+            win.analyze_btn.invoke()
+            self.wait()
+        self.assertIn("offline", err.call_args[0][1])
+
+    def test_crash_tab_without_files(self):
+        self.app.analyze_crash()
+        self.assertIn("No crash report found", self.app.crash_text.get("1.0", "end"))
+
+    def test_manage_disabled_reenables(self):
+        self.analyze()
+        self.assertEqual(self.gui.fixer.list_disabled(self.inst), ["mods/already-off.jar.disabled"])
+        fixer = self.gui.fixer
+        from modpack_doctor.models import Action
+        fixer.apply_actions(self.inst, [Action("disable_mod", {"file": "mods/lithium-0.11.1-old.jar"})])
+        self.app.analyze()
+        self.wait()
+        self.app.manage_disabled()
+        win = self.app._disabled_win
+        self.assertEqual(win.listbox.size(), 2)
+        win.listbox.selection_set(win.listbox.get(0, "end").index("mods/lithium-0.11.1-old.jar.disabled"))
+        with mock.patch.object(self.gui.messagebox, "askokcancel", return_value=True), \
+                mock.patch.object(self.gui.messagebox, "showinfo"), mock.patch.object(self.gui.messagebox, "showwarning"):
+            win.update()
+            win.enable_btn.invoke()
+            self.wait()
+        self.assertTrue((self.inst / "mods" / "lithium-0.11.1-old.jar").is_file())
+
+    def test_export_mod_list_and_shortcuts(self):
+        self.analyze()
+        out = Path(self.tmp.name) / "mods.csv"
+        with mock.patch.object(self.gui.filedialog, "asksaveasfilename", return_value=str(out)):
+            self.app.export_mod_list()
+        self.assertIn("sodium", out.read_text(encoding="utf-8-sig"))
+        self.assertIn("mods", self.app.status_var.get())
+        self.app.show_shortcuts()
+        self.app.update()
+
     def _select(self, code):
         for iid, f in self.app._finding_by_iid.items():
             if f.code == code:

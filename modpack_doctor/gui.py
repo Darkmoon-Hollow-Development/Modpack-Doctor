@@ -17,8 +17,8 @@ from typing import Callable, Optional
 import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 
-from . import __version__, fixer, net, pipeline, viewmodel as vm
-from .models import LOADERS
+from . import __version__, crashlog, fixer, net, pipeline, viewmodel as vm
+from .models import LOADERS, Action, Fix
 from .rules import load_rules
 from .sources import Options, SourceError
 from .widgets import Card, PillNotebook, RoundButton, TabPill, mix
@@ -97,6 +97,7 @@ class Tab:
         self.result = None
         self.undo_groups: list = []  # one list of change-set ids per fix run (an auto-fix run spans several)
         self.attention = False  # a background task finished while this tab was not showing
+        self.crash = None  # (path, CrashReport) of the last crash analysis
         self.view: dict = {}  # filters / sub-tab to put back when the tab is shown again
 
     def spec(self) -> vm.TabSpec:
@@ -385,6 +386,7 @@ class App(tk.Tk):
         f.add_separator()
         f.add_command(label="Export report...", accelerator="Ctrl+S", command=self.export)
         f.add_command(label="Copy report as Markdown", command=self.copy_report)
+        f.add_command(label="Export mod list...", command=self.export_mod_list)
         f.add_separator()
         f.add_command(label="Quit", command=self._on_close)
         m.add_cascade(label="File", menu=f)
@@ -395,6 +397,9 @@ class App(tk.Tk):
         t.add_separator()
         t.add_command(label="Open analysed folder", command=self.open_folder)
         t.add_command(label="Show ignored warnings again", command=self.show_ignored_again)
+        t.add_command(label="Analyze latest crash report", accelerator="Ctrl+L", command=self.analyze_crash)
+        t.add_command(label="Manage disabled mods...", command=self.manage_disabled)
+        t.add_separator()
         t.add_command(label="Open mods folder", accelerator="Ctrl+M", command=lambda: self.open_pack_folder("mods"))
         t.add_command(label="Open config folder", accelerator="Ctrl+Shift+C",
                       command=lambda: self.open_pack_folder("config"))
@@ -410,6 +415,8 @@ class App(tk.Tk):
         v.add_checkbutton(label="Reopen my tabs on startup", variable=self.restore_var, command=self._on_restore_toggle)
         m.add_cascade(label="View", menu=v)
         h = tk.Menu(m, tearoff=False)
+        h.add_command(label="Keyboard shortcuts", command=self.show_shortcuts)
+        h.add_separator()
         h.add_command(label="About", command=self.about)
         m.add_cascade(label="Help", menu=h)
         self.config(menu=m)
@@ -508,6 +515,7 @@ class App(tk.Tk):
         self._build_findings_tab(right)
         self._build_mods_tab(right)
         self._build_details_tab(right)
+        self._build_crash_tab(right)
 
     def _build_summary(self, parent) -> None:
         box = parent
@@ -644,6 +652,8 @@ class App(tk.Tk):
         ttk.Checkbutton(bar, text="Only mods with findings", variable=self.mod_issue_var,
                         command=self._refresh_mods).pack(side="left")
         self.mod_search_var.trace_add("write", lambda *a: self._refresh_mods())
+        self.mods_export_btn = self._btn(bar, "Export list...", self.export_mod_list, padx=10, pady=3)
+        self.mods_export_btn.pack(side="right", padx=(8, 0))
         self.mods_lbl = ttk.Label(bar, text="Double-click a mod to see its findings", style="Muted.TLabel")
         self.mods_lbl.pack(side="right")
         cols = ("name", "mod_id", "version", "loader", "side", "file", "issue")
@@ -673,6 +683,32 @@ class App(tk.Tk):
         self.pack_text.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
+    def _build_crash_tab(self, nb) -> None:
+        tab = ttk.Frame(nb, padding=(0, 8, 0, 0))
+        nb.add(tab, text="Crash log")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x")
+        self.crash_btn = self._btn(bar, "Analyze latest crash", self.analyze_crash, kind="accent", padx=12, pady=5)
+        self.crash_btn.pack(side="left")
+        self._btn(bar, "Open a crash file...", self.open_crash_file, padx=12, pady=5).pack(side="left", padx=(8, 0))
+        self.paste_btn = self._btn(bar, "Paste text or link...", self.paste_crash, padx=12, pady=5)
+        self.paste_btn.pack(side="left", padx=(8, 0))
+        self.crash_fix_frame = ttk.Frame(tab)
+        self.crash_fix_frame.pack(side="bottom", fill="x", pady=(6, 0))
+        tf = ttk.Frame(tab)
+        tf.pack(side="top", fill="both", expand=True, pady=(8, 0))
+        self.crash_text = tk.Text(tf, wrap="word", relief="flat", padx=10, pady=8, state="disabled", font=self.f_base,
+                                  highlightthickness=1)
+        self._themed_texts.append(self.crash_text)
+        sb = ttk.Scrollbar(tf, orient="vertical", command=self.crash_text.yview)
+        self.crash_text.configure(yscrollcommand=sb.set)
+        self.crash_text.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.crash_text.tag_configure("h1", font=self.f_h1, spacing3=2)
+        self.crash_text.tag_configure("h2", font=self.f_bold, spacing1=8)
+        self.crash_text.tag_configure("mono", font=self.f_mono)
+        self._render_crash()
+
     def _build_status(self) -> None:
         bar = self._page_frame(self)
         bar.pack(fill="x", side="bottom", before=self._body, padx=16, pady=(4, 8))  # never squeezed out
@@ -688,6 +724,7 @@ class App(tk.Tk):
         self.bind("<Control-O>", lambda e: self.pick_file())
         self.bind("<Control-s>", lambda e: self.export())
         self.bind("<Control-m>", lambda e: self.open_pack_folder("mods"))
+        self.bind("<Control-l>", lambda e: self.analyze_crash())
         self.bind("<Control-C>", lambda e: self.open_pack_folder("config"))
         self.src_entry.bind("<Return>", lambda e: self.analyze())
         for seq, fn in (("<Control-t>", self.new_tab), ("<Control-w>", self.close_tab), ("<Control-T>", self.reopen_closed_tab),
@@ -847,6 +884,7 @@ class App(tk.Tk):
             self._show_empty()
             if not self.busy:
                 self.status_var.set("Ready." if not t.source.strip() else "Not scanned yet. Press Analyze (F5).")
+        self._render_crash()
         try:
             self.notebook.select(int(v.get("inner", 0)))
         except (tk.TclError, ValueError, TypeError):
@@ -1413,6 +1451,12 @@ class App(tk.Tk):
         self._set_menu(self.menu_tools, "Open config folder", "config" in folders)
         self._set_menu(self.menu_file, "Export report...", has and idle)
         self._set_menu(self.menu_file, "Copy report as Markdown", has)
+        self._set_menu(self.menu_file, "Export mod list...", has)
+        self.mods_export_btn.state(["!disabled"] if has else ["disabled"])
+        can_root = bool(folders.get("pack"))
+        self._set_menu(self.menu_tools, "Analyze latest crash report", can_root)
+        self._set_menu(self.menu_tools, "Manage disabled mods...", bool(has and can_fix))
+        self.crash_btn.state(["!disabled"] if can_root else ["disabled"])
         for b in self.fix_frame.winfo_children():
             b.state(["!disabled"] if can_fix else ["disabled"])
 
@@ -1844,6 +1888,226 @@ class App(tk.Tk):
     def open_folder(self) -> None:
         if self.result is not None and self.result.pack.root is not None:
             open_in_file_manager(self.result.pack.root)
+
+    # ------------------------------------------------------------------ crash log
+    def _crash_root(self) -> Optional[Path]:
+        return vm.pack_folders(self.result, self.src_var.get()).get("pack")
+
+    def analyze_crash(self) -> None:
+        root = self._crash_root()
+        if root is None:
+            messagebox.showinfo("Modpack Doctor", "Open a pack folder first, then analyze its latest crash report.")
+            return
+        path = crashlog.find_latest(root)
+        if path is None:
+            self.notebook.select(3)
+            self.tab.crash = None
+            self._set_text(self.crash_text, [("No crash report found\n", "h1"),
+                                             (f"There is no crash-reports folder or logs/latest.log in:\n{root}\n\n"
+                                              "If the game crashed, use 'Open a crash file...' and pick the report.",)])
+            self._clear_crash_buttons()
+            return
+        self._analyze_crash_file(path)
+
+    def open_crash_file(self) -> None:
+        root = self._crash_root()
+        initial = root / "crash-reports" if root is not None and (root / "crash-reports").is_dir() else root
+        path = filedialog.askopenfilename(title="Open a crash report or log", initialdir=str(initial) if initial else None,
+                                          filetypes=[("Crash report / log", "*.txt *.log"), ("All files", "*.*")])
+        if path:
+            self._analyze_crash_file(Path(path))
+
+    def paste_crash(self) -> None:
+        """Let someone paste a crash report / log (or an mclo.gs link) sent by a player, without needing the file."""
+        if self.busy:
+            return
+        p = self.pal
+        win = tk.Toplevel(self)
+        win.title("Paste a crash report")
+        win.geometry("760x480")
+        win.transient(self)
+        win.configure(background=p["bg"])
+        ttk.Label(win, text="Paste the crash report or log text here, or an mclo.gs link. Works without the pack folder; "
+                  "open the pack as well to get Disable buttons.", wraplength=720, justify="left").pack(
+            anchor="w", padx=14, pady=(12, 6))
+        btns = ttk.Frame(win)
+        btns.pack(side="bottom", fill="x", padx=14, pady=12)
+        txt = tk.Text(win, wrap="none", relief="flat", highlightthickness=1, font=self.f_mono, bg=p["field"], fg=p["fg"],
+                      insertbackground=p["fg"], highlightbackground=p["border"], selectbackground=p["select_bg"],
+                      selectforeground=p["select_fg"])
+        txt.pack(fill="both", expand=True, padx=14)
+        win.text = txt  # type: ignore[attr-defined]
+        try:
+            clip = self.clipboard_get()
+            if clip and ("Crash Report" in clip[:3000] or "mclo.gs" in clip[:200] or "Exception" in clip[:20000]):
+                txt.insert("1.0", clip)
+        except tk.TclError:
+            pass
+        txt.focus_set()
+
+        def go() -> None:
+            raw = txt.get("1.0", "end")
+            if not raw.strip():
+                return
+            win.destroy()
+            if crashlog.share_link_id(raw):
+                link = crashlog.share_link_id(raw)
+                self._start(lambda prog: crashlog.analyze_pasted(raw), self._on_pasted_crash,
+                            f"Downloading mclo.gs/{link}...")
+            else:
+                self._on_pasted_crash(crashlog.analyze_pasted(raw), None)
+
+        win.analyze_btn = ttk.Button(btns, text="Analyze", style="Accent.TButton", command=go)  # type: ignore[attr-defined]
+        win.analyze_btn.pack(side="left")
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="right")
+
+    def _on_pasted_crash(self, rep, err) -> None:
+        if err:
+            e = err[0] if isinstance(err, tuple) else err
+            messagebox.showerror("Modpack Doctor", f"Could not get that log:\n{e}")
+            return
+        if self.result is not None:
+            crashlog.match_jars(rep, self.result.jars)
+        self.tab.crash = ("(pasted)" if rep.name == "pasted text" else rep.name, rep)
+        self._render_crash()
+        self.notebook.select(3)
+        self.status_var.set(f"Analyzed {rep.name}.")
+
+    def _analyze_crash_file(self, path: Path) -> None:
+        try:
+            rep = crashlog.analyze_file(path)
+        except OSError as e:
+            messagebox.showerror("Modpack Doctor", f"Could not read {path.name}:\n{e}")
+            return
+        if self.result is not None:
+            crashlog.match_jars(rep, self.result.jars)
+        self.tab.crash = (str(path), rep)
+        self._render_crash()
+        self.notebook.select(3)
+        self.status_var.set(f"Analyzed {path.name}.")
+
+    def _clear_crash_buttons(self) -> None:
+        for w in self.crash_fix_frame.winfo_children():
+            w.destroy()
+
+    def _render_crash(self) -> None:
+        self._clear_crash_buttons()
+        data = self.tab.crash
+        if not data:
+            self._set_text(self.crash_text, [("Crash log\n", "h1"),
+                                             ("If the game crashed, press 'Analyze latest crash' to read the newest file in "
+                                              "this pack's crash-reports folder (or logs/latest.log). It explains what "
+                                              "went wrong in plain words and points at the mod to blame.\n\n"
+                                              "It reads the common Forge, NeoForge, Fabric and Quilt formats. Treat the "
+                                              "result as a strong hint rather than proof.",)])
+            return
+        path, rep = data
+        parts = [(rep.name + "\n", "h1")]
+        if rep.description:
+            parts.append(("What the game was doing: " + rep.description + "\n",))
+        if rep.exception:
+            parts.append(("Error: ", "h2"))
+            parts.append((rep.exception + "\n", "mono"))
+        parts.append(("\nWhat this means\n", "h2"))
+        for line in rep.advice:
+            parts.append(("  - " + line + "\n",))
+        if rep.suspects:
+            parts.append(("\nMods involved\n", "h2"))
+            for s in rep.suspects:
+                where = f"  [{s.jar}]" if s.jar else "  [jar not found in this pack]"
+                parts.append((f"  - {s.label}{' ' + s.version if s.version else ''}{where}\n",))
+        parts.append((f"\nFile: {path}\n", "mono"))
+        self._set_text(self.crash_text, parts)
+        if self.result is not None and self.result.pack.root is not None:
+            seen = set()
+            for s in rep.suspects:
+                if s.jar and s.jar not in seen and (self.result.pack.root / s.jar).is_file():
+                    seen.add(s.jar)
+                    fx = Fix(f"Disable {Path(s.jar).name}", [Action("disable_mod", {"file": s.jar})])
+                    self._btn(self.crash_fix_frame, fx.label, lambda fx=fx: self._apply([fx]),
+                              padx=10, pady=5).pack(side="left", padx=(0, 6))
+
+    # ------------------------------------------------------------------ disabled mods
+    def manage_disabled(self) -> None:
+        res = self.result
+        if res is None or res.pack.root is None or self.busy:
+            return
+        root = res.pack.root
+        items = fixer.list_disabled(root)
+        if not items:
+            messagebox.showinfo("Modpack Doctor", "There are no disabled mods in this pack.")
+            return
+        p = self.pal
+        win = tk.Toplevel(self)
+        win.title("Disabled mods")
+        win.geometry("720x420")
+        win.minsize(520, 280)
+        win.transient(self)
+        win.configure(background=p["bg"])
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Mods that were switched off (renamed to .jar.disabled). Select the ones to turn back on.",
+                  wraplength=660, justify="left").pack(anchor="w", pady=(0, 8))
+        buttons = ttk.Frame(frame)
+        buttons.pack(side="bottom", fill="x", pady=(10, 0))
+        box = ttk.Frame(frame)
+        box.pack(side="top", fill="both", expand=True)
+        lb = tk.Listbox(box, selectmode="extended", exportselection=False, relief="flat", highlightthickness=1,
+                        activestyle="none", bg=p["field"], fg=p["fg"], selectbackground=p["select_bg"],
+                        selectforeground=p["select_fg"], highlightbackground=p["border"], font=self.f_base)
+        sb = ttk.Scrollbar(box, orient="vertical", command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        lb.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        for rel in items:
+            lb.insert("end", rel)
+        win.listbox = lb  # type: ignore[attr-defined]
+        self._disabled_win = win
+
+        def enable(selected: list) -> None:
+            if not selected:
+                return
+            win.destroy()
+            fx = Fix(f"Re-enable {len(selected)} mod(s)" if len(selected) > 1 else f"Re-enable {Path(selected[0]).name}",
+                     [Action("enable_mod", {"file": r}) for r in selected])
+            self._apply([fx])
+
+        win.enable_btn = ttk.Button(buttons, text="Re-enable selected", style="Accent.TButton",  # type: ignore[attr-defined]
+                                    command=lambda: enable([items[i] for i in lb.curselection()]))
+        win.enable_btn.pack(side="left")
+        ttk.Button(buttons, text="Select all", command=lambda: lb.selection_set(0, "end")).pack(side="left", padx=(8, 0))
+        ttk.Button(buttons, text="Close", command=win.destroy).pack(side="right")
+
+    # ------------------------------------------------------------------ export list / help
+    def export_mod_list(self) -> None:
+        if self.result is None:
+            return
+        name = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in (self.result.pack.name or "modpack")).strip()
+        path = filedialog.asksaveasfilename(
+            title="Export mod list", defaultextension=".csv", initialfile=f"{name or 'modpack'}-mods.csv",
+            filetypes=[("CSV (Excel)", "*.csv"), ("Markdown table", "*.md")])
+        if not path:
+            return
+        try:
+            n = vm.export_mod_list(self.result, path)
+        except OSError as e:
+            messagebox.showerror("Modpack Doctor", f"Could not write the list:\n{e}")
+            return
+        self.status_var.set(f"Saved {n} mods to {path}")
+
+    def show_shortcuts(self) -> None:
+        p = self.pal
+        win = tk.Toplevel(self)
+        win.title("Keyboard shortcuts")
+        win.transient(self)
+        win.configure(background=p["bg"])
+        txt = tk.Text(win, width=62, height=len(vm.SHORTCUTS) + 2, relief="flat", padx=14, pady=12, font=self.f_mono,
+                      bg=p["surface"], fg=p["fg"], highlightthickness=0)
+        txt.insert("1.0", vm.shortcuts_text())
+        txt.configure(state="disabled")
+        txt.pack(fill="both", expand=True, padx=12, pady=(12, 6))
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 12))
+        win.shortcuts_text = txt  # type: ignore[attr-defined]
 
     def about(self) -> None:
         messagebox.showinfo("About Modpack Doctor", f"Modpack Doctor {__version__}\n\nChecks Minecraft modpacks for mod "
