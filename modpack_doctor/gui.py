@@ -387,6 +387,7 @@ class App(tk.Tk):
         f.add_command(label="Export report...", accelerator="Ctrl+S", command=self.export)
         f.add_command(label="Copy report as Markdown", command=self.copy_report)
         f.add_command(label="Export mod list...", command=self.export_mod_list)
+        f.add_command(label="Save mod list as .txt...", command=self.export_mod_txt)
         f.add_separator()
         f.add_command(label="Quit", command=self._on_close)
         m.add_cascade(label="File", menu=f)
@@ -654,7 +655,9 @@ class App(tk.Tk):
         self.mod_search_var.trace_add("write", lambda *a: self._refresh_mods())
         self.mods_export_btn = self._btn(bar, "Export list...", self.export_mod_list, padx=10, pady=3)
         self.mods_export_btn.pack(side="right", padx=(8, 0))
-        self.mods_lbl = ttk.Label(bar, text="Double-click a mod to see its findings", style="Muted.TLabel")
+        self.mods_txt_btn = self._btn(bar, "Save as .txt", self.export_mod_txt, padx=10, pady=3)
+        self.mods_txt_btn.pack(side="right", padx=(8, 0))
+        self.mods_lbl = ttk.Label(bar, text="", style="Muted.TLabel")
         self.mods_lbl.pack(side="right")
         cols = ("name", "mod_id", "version", "loader", "side", "file", "issue")
         heads = {"name": ("Name", 160), "mod_id": ("Mod id", 140), "version": ("Version", 90), "loader": ("Loader", 78),
@@ -909,7 +912,7 @@ class App(tk.Tk):
         self.cat_combo.configure(values=[vm.ALL_CATEGORIES])
         self.cat_var.set(vm.ALL_CATEGORIES)
         self.shown_lbl.configure(text="")
-        self.mods_lbl.configure(text="Double-click a mod to see its findings")
+        self.mods_lbl.configure(text="")
         self._set_text(self.detail, [("",)])
         self._set_text(self.pack_text, [("",)])
         self._clear_fix_buttons()
@@ -1453,6 +1456,8 @@ class App(tk.Tk):
         self._set_menu(self.menu_file, "Copy report as Markdown", has)
         self._set_menu(self.menu_file, "Export mod list...", has)
         self.mods_export_btn.state(["!disabled"] if has else ["disabled"])
+        self.mods_txt_btn.state(["!disabled"] if has else ["disabled"])
+        self._set_menu(self.menu_file, "Save mod list as .txt...", has)
         can_root = bool(folders.get("pack"))
         self._set_menu(self.menu_tools, "Analyze latest crash report", can_root)
         self._set_menu(self.menu_tools, "Manage disabled mods...", bool(has and can_fix))
@@ -1559,7 +1564,7 @@ class App(tk.Tk):
             self.mod_tree.insert("", "end", iid=f"m{i}", values=(r.name, r.mod_id, r.version, r.loader, r.side, r.file,
                                                                   vm.SEVERITY_LABEL.get(r.issue, "")),
                                  tags=(r.issue,) if r.issue else ())
-        self.mods_lbl.configure(text=f"{len(rows)} of {len(self._mod_rows)} mods - double-click one to see its findings")
+        self.mods_lbl.configure(text=f"{len(rows)} of {len(self._mod_rows)} mods")
 
     def _on_mod_double_click(self, event) -> None:
         iid = self.mod_tree.identify_row(event.y)
@@ -2079,13 +2084,22 @@ class App(tk.Tk):
         ttk.Button(buttons, text="Close", command=win.destroy).pack(side="right")
 
     # ------------------------------------------------------------------ export list / help
-    def export_mod_list(self) -> None:
+    def export_mod_txt(self) -> None:
+        """One click: save the plain list of mods as a .txt file."""
+        self.export_mod_list(txt=True)
+
+    def export_mod_list(self, txt: bool = False) -> None:
         if self.result is None:
             return
         name = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in (self.result.pack.name or "modpack")).strip()
-        path = filedialog.asksaveasfilename(
-            title="Export mod list", defaultextension=".csv", initialfile=f"{name or 'modpack'}-mods.csv",
-            filetypes=[("CSV (Excel)", "*.csv"), ("Markdown table", "*.md")])
+        if txt:
+            path = filedialog.asksaveasfilename(
+                title="Save mod list as text", defaultextension=".txt", initialfile=f"{name or 'modpack'}-mods.txt",
+                filetypes=[("Text file", "*.txt")])
+        else:
+            path = filedialog.asksaveasfilename(
+                title="Export mod list", defaultextension=".csv", initialfile=f"{name or 'modpack'}-mods.csv",
+                filetypes=[("CSV (Excel)", "*.csv"), ("Markdown table", "*.md"), ("Text file", "*.txt")])
         if not path:
             return
         try:

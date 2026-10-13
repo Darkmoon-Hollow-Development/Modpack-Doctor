@@ -241,6 +241,17 @@ class ExportTests(unittest.TestCase):
         vm.export_mod_list(self.res, str(md))
         self.assertTrue(md.read_text(encoding="utf-8").startswith("| Name"))
 
+    def test_plain_text_list(self):
+        text = vm.render_mod_list(self.res, "txt")
+        lines = text.splitlines()
+        self.assertTrue(lines[0].endswith(f" - {len(vm.mod_rows(self.res))} mods"))
+        self.assertEqual(lines[1], "")
+        self.assertIn("sodium 0.5.3  [sodium]  (mods/sodium-0.5.3.jar)", lines)
+        p = Path(self.tmp.name) / "m.txt"
+        vm.export_mod_list(self.res, str(p))
+        self.assertFalse(p.read_bytes().startswith(b"\xef\xbb\xbf"))  # no BOM: plain text
+        self.assertEqual(p.read_text(encoding="utf-8"), text)
+
     def test_shortcuts_text_lists_every_binding(self):
         t = vm.shortcuts_text()
         self.assertIn("F5", t)

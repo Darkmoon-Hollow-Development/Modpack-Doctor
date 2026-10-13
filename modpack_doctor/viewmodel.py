@@ -211,6 +211,13 @@ def render_mod_list(result: AnalysisResult, fmt: str = "csv") -> str:
     rows = sort_mod_rows(mod_rows(result), "name")
     head = ["Name", "Mod id", "Version", "Loader", "Side", "File", "Issue"]
     data = [[r.name, r.mod_id, r.version, r.loader, r.side, r.file, r.issue] for r in rows]
+    if fmt in ("txt", "text"):
+        title = result.pack.name or "Modpack"
+        lines = [f"{title} - {len(rows)} mods", ""]
+        for r in rows:
+            ver = f" {r.version}" if r.version and r.version != "?" else ""
+            lines.append(f"{r.name}{ver}  [{r.mod_id}]  ({r.file})")
+        return "\n".join(lines) + "\n"
     if fmt in ("md", "markdown"):
         esc = lambda v: str(v).replace("|", "\\|").replace("\n", " ")  # noqa: E731
         out = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
@@ -224,7 +231,8 @@ def render_mod_list(result: AnalysisResult, fmt: str = "csv") -> str:
 
 
 def export_mod_list(result: AnalysisResult, path: str) -> int:
-    fmt = "md" if Path(path).suffix.lower() in (".md", ".markdown") else "csv"
+    ext = Path(path).suffix.lower()
+    fmt = "md" if ext in (".md", ".markdown") else "txt" if ext == ".txt" else "csv"
     # utf-8-sig so Excel on Windows reads accented mod names correctly
     Path(path).write_text(render_mod_list(result, fmt), encoding="utf-8-sig" if fmt == "csv" else "utf-8")
     return len(mod_rows(result))

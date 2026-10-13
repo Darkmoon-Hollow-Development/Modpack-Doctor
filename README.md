@@ -76,7 +76,7 @@ Forge, NeoForge, Fabric and Quilt formats; treat the result as a strong hint, no
 - **Tools > Manage disabled mods...** lists every `.jar.disabled` file and turns the ones you pick back on. It can be undone
   like any other fix, and it never overwrites a jar that already exists.
 - **Export list...** on the Mods tab (or **File > Export mod list...**) saves the mod table as CSV (opens in Excel) or a
-  Markdown table for forum posts. **Help > Keyboard shortcuts** shows every shortcut.
+  Markdown table for forum posts. **Save as .txt** (next to it) writes a plain one-mod-per-line list. **Help > Keyboard shortcuts** shows every shortcut.
 
 **Where to find your instance folder:**
 

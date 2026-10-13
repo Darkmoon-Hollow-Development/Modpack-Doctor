@@ -170,6 +170,13 @@ class GuiTests(unittest.TestCase):
         self.assertIn("mods", self.app.status_var.get())
         self.app.show_shortcuts()
         self.app.update()
+        txt = Path(self.tmp.name) / "mods.txt"
+        self.assertNotIn("disabled", self.app.mods_txt_btn.state())
+        with mock.patch.object(self.gui.filedialog, "asksaveasfilename", return_value=str(txt)) as ask:
+            self.app.mods_txt_btn.invoke()
+        self.assertEqual(ask.call_args.kwargs["filetypes"], [("Text file", "*.txt")])
+        self.assertIn("sodium 0.5.3", txt.read_text(encoding="utf-8"))
+        self.assertIn("mods", self.app.status_var.get())
 
     def _select(self, code):
         for iid, f in self.app._finding_by_iid.items():
