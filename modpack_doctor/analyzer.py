@@ -5,6 +5,7 @@ import re
 from collections import defaultdict
 from typing import Optional
 
+from . import launchers
 from .models import Action, Dependency, Finding, Fix, JarInfo, ModInfo, PackContext
 from .version import Version, format_range, is_release_like, matches, sort_key
 
@@ -328,16 +329,24 @@ class Analyzer:
             who = ", ".join(sorted({m.display for _, m, _ in items})[:3])
             more = f" and {len(seen_files) - 3} more" if len(seen_files) > 3 else ""
             fixes = []
+            detail_extra = ""
             if pack.loader and pack.mc_version:
                 fixes.append(Fix(
-                    f'Download "{self._display_for(did)}" from Modrinth',
+                    f'Download "{self._display_for(did)}" to your pack from Modrinth',
                     [Action("install_project", {"query": did, "slug": slugs.get(did), "mc": pack.mc_version,
                                                 "loader": pack.loader, "display": self._display_for(did)})],
                     auto=True, needs_network=True))
+            else:
+                detail_extra = ("\n\nThe download button is missing because the Minecraft version or the loader of this "
+                                "pack is unknown. Fill them in at the top of the window and press Analyze again.")
+            detail_extra += ("\n\nIf the download cannot find it on Modrinth (some mods are only on CurseForge), use the "
+                             "search buttons to find it by hand and drop the file into your mods folder.")
             self._add("error", "missing_dep", "Missing dependency",
                       f'Missing required mod "{self._display_for(did)}" (needed by {who}{more})',
-                      "These mods will refuse to load, or crash the game at startup, without it:\n" + "\n".join(lines[:15]),
+                      "These mods will refuse to load, or crash the game at startup, without it:\n" + "\n".join(lines[:15])
+                      + detail_extra,
                       mods=sorted({m.mod_id for _, m, _ in items}), files=sorted(seen_files), fixes=fixes,
+                      links=launchers.search_links(self._display_for(did), pack.launcher),
                       trace=[self._dep_trace(j, m, d) for j, m, d in items[:12]] +
                             [f'No installed mod provides id "{did}" (looked at mod ids, "provides" lists, '
                              "bundled jar-in-jar libraries and the loader's built-in ids)"])
@@ -438,11 +447,29 @@ class Analyzer:
             present[_norm_id(m.mod_id)].append((jar, m))
         return present
 
+    @staticmethod
+    def _one_per_jar(ids: list, present: dict) -> list:
+        """Keep one mod id per jar. A jar can declare an extra compatibility id (Embeddium also declares
+        "rubidium"), and that must not count as a second, different mod being installed."""
+        chosen: dict = {}  # jar rel -> id kept for it
+        for x in ids:
+            for jar, _ in present[x]:
+                name = jar.rel.lower()
+                cur = chosen.get(jar.rel)
+                if cur is None or (x in name and cur not in name):
+                    chosen[jar.rel] = x  # prefer the id that the file name itself carries
+        keep = set(chosen.values())
+        return [x for x in ids if x in keep]
+
     def _check_rule_conflicts(self) -> None:
         present = self._present()
         for ri, rule in enumerate(self.rules.get("conflicts", [])):
             a = [x for x in map(_norm_id, rule["a"]) if x in present]
             b = [x for x in map(_norm_id, rule["b"]) if x in present]
+            shared = {j.rel for x in a for j, _ in present[x]} & {j.rel for x in b for j, _ in present[x]}
+            if shared:  # one jar declaring ids on both sides is not a conflict between two mods
+                a = [x for x in a if any(j.rel not in shared for j, _ in present[x])]
+                b = [x for x in b if any(j.rel not in shared for j, _ in present[x])]
             if not a or not b:
                 continue
             side_a = {j.rel: j for x in a for j, _ in present[x]}
@@ -461,7 +488,7 @@ class Analyzer:
     def _check_redundant(self) -> None:
         present = self._present()
         for ri, rule in enumerate(self.rules.get("redundant", [])):
-            group = [x for x in map(_norm_id, rule["group"]) if x in present]
+            group = self._one_per_jar([x for x in map(_norm_id, rule["group"]) if x in present], present)
             if len(group) < 2:
                 continue
             order = rule.get("prefer_by_loader", {}).get(self.pack.loader or "", rule.get("prefer", rule["group"]))
@@ -510,12 +537,13 @@ class Analyzer:
             display = rule.get("display") or rule.get("display_by_loader", {}).get(pack.loader) or slug
             fixes = []
             if slug and pack.mc_version:
-                fixes.append(Fix(f"Download {display} from Modrinth",
+                fixes.append(Fix(f"Download {display} to your pack from Modrinth",
                                  [Action("install_project", {"query": slug, "slug": slug, "mc": pack.mc_version,
                                                              "loader": pack.loader, "display": display})],
                                  auto=False, needs_network=True))
             self._add("info", "recommend", "Suggestion", rule["title"], rule["message"],
                       mods=[slug] if slug else [], fixes=fixes,
+                      links=launchers.search_links(display, pack.launcher) if display else [],
                       trace=[f"rules.json > recommended[{ri}]: loaders={rule.get('loaders')}, "
                              f"absent_if_any={rule.get('absent_if_any', [])}",
                              f"none of those mod ids is installed; pack loader is {pack.loader}"])

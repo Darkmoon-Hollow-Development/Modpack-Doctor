@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import fixer, pipeline, report
+from . import fixer, launchers, pipeline, report
 from .models import LOADERS
 from .sources import Options, SourceError
 
@@ -20,6 +20,8 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--mc", help="Minecraft version (default: read from launcher data or inferred)")
     p.add_argument("--loader", choices=LOADERS, help="Mod loader (default: read from launcher data or inferred)")
     p.add_argument("--side", choices=("client", "server", "both"), help="Target side (default: auto)")
+    p.add_argument("--launcher", choices=[k for k in launchers.KEYS if k != "auto"],
+                   help="Launcher the pack lives in (default: detected from its files)")
     p.add_argument("--online", action="store_true", help="Also ask Modrinth about updates and replacements")
     p.add_argument("--cf-key", default=os.environ.get("CURSEFORGE_API_KEY"),
                    help="CurseForge API key for resolving CurseForge pack downloads (or set CURSEFORGE_API_KEY)")
@@ -29,7 +31,8 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def _run(args):
-    opts = Options(mc=args.mc, loader=args.loader, side=args.side, cf_key=args.cf_key, workspace_dir=args.workspace)
+    opts = Options(mc=args.mc, loader=args.loader, side=args.side, launcher=args.launcher, cf_key=args.cf_key,
+                   workspace_dir=args.workspace)
     return pipeline.run_analysis(args.source, opts, online=args.online, rules_path=args.rules,
                                  progress=None if args.quiet else _progress)
 

@@ -109,6 +109,7 @@ class Finding:
     files: list = field(default_factory=list)  # jar paths relative to the instance root
     fixes: list = field(default_factory=list)
     trace: list = field(default_factory=list)  # developer view: which check, jar, metadata file and key produced this
+    links: list = field(default_factory=list)  # [(label, url)] pages to look the mod up by hand
 
     def to_dict(self) -> dict:
         return {
@@ -121,6 +122,7 @@ class Finding:
             "files": self.files,
             "fixes": [f.to_dict() for f in self.fixes],
             "trace": self.trace,
+            "links": [{"label": a, "url": b} for a, b in self.links],
         }
 
 
@@ -139,6 +141,7 @@ class PackContext:
     unresolved: list = field(default_factory=list)  # pack entries that could not be fetched
     disabled_count: int = 0
     mod_count: int = 0
+    launcher: str = ""  # key from launchers.LAUNCHERS ("" = unknown)
 
 
 @dataclass
@@ -168,6 +171,7 @@ class AnalysisResult:
                 "source": p.source,
                 "mods": p.mod_count,
                 "disabled_files": p.disabled_count,
+                "launcher": p.launcher or None,
                 "notes": p.notes,
                 "unresolved": p.unresolved,
             },

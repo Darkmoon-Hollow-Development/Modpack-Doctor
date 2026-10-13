@@ -58,7 +58,8 @@ def reanalyze(prev: AnalysisResult, *, online: bool = False, rules_path: Optiona
     p = prev.pack
     if p.root is None:
         raise ValueError("The previous analysis has no folder to re-check")
-    opts = Options(mc=p.mc_version, loader=p.loader, side=p.side, loader_version=p.loader_version,
+    opts = Options(mc=p.mc_version, loader=p.loader, side=p.side, launcher=p.launcher or None,
+                   loader_version=p.loader_version,
                    name=p.name, source_label=p.source, unresolved=list(p.unresolved), max_mem_mb=p.max_mem_mb)
     res = run_analysis(str(p.root), opts, online=online, rules_path=rules_path, progress=progress)
     res.pack.notes[:0] = [n for n in p.notes if n not in res.pack.notes and "because you chose to ignore" not in n]

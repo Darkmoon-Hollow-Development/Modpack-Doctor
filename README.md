@@ -71,6 +71,20 @@ jar get a **Disable** button. Use **Open a crash file...** to read any report yo
 a player sent you: paste the report or log text, or an `mclo.gs` link (only `api.mclo.gs` is contacted, and only then). It understands the common
 Forge, NeoForge, Fabric and Quilt formats; treat the result as a strong hint, not proof.
 
+### Launcher and downloading missing mods
+
+- **Launcher** (top of the window): pick CurseForge app, Modrinth App, Prism / MultiMC, ATLauncher, GDLauncher, the
+  Minecraft Launcher or Server / other. The folder and pack-file dialogs then open in that launcher's usual instances
+  folder, a client launcher marks the pack as client-side (and *Server / other* as a server), and search links list that
+  launcher's site first. It stays on *Auto-detect* unless you change it, and Prism / MultiMC and CurseForge instances are
+  recognised from their own files. It never overrides the Minecraft version or loader found in the folder.
+- **A missing mod:** the finding has a **Download "X" to your pack from Modrinth** button. The file is checked against
+  Modrinth's hashes and saved in the `mods` folder, and **Undo last fix** removes it again. Some mods exist only on CurseForge,
+  so the finding also has **Search CurseForge** and **Search Modrinth** buttons that open a search in your browser.
+  The in-app download works for Modrinth only.
+- **Tools > Download a mod...** downloads any mod by name (or Modrinth slug), not only ones the scan found missing.
+  It needs the Minecraft version and loader to be known.
+
 ### Disabled mods, mod lists
 
 - **Tools > Manage disabled mods...** lists every `.jar.disabled` file and turns the ones you pick back on. It can be undone
@@ -157,6 +171,8 @@ python -m modpack_doctor gui demo-pack
 
 - It reads mod **metadata**. It cannot detect every crash (for example mixin conflicts or code-level incompatibilities
   that no mod declares). Read a clean result as "no known problems", not "will run".
+- Downloads come from Modrinth only. CurseForge-only mods have to be fetched by hand (the search buttons help), because
+  CurseForge needs an API key and does not allow every mod to be downloaded by other tools.
 - Crash analysis only recognises the formats listed above; a crash with no named mod gets an honest "nothing points at a
   specific mod" rather than a guess.
 - Config checks are rule-based (syntax plus the value rules in `rules.json`) and do not understand every mod's settings.

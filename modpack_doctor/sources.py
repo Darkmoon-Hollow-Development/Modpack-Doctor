@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable, Optional
 
-from . import curseforge, net
+from . import curseforge, launchers, net
 from .analyzer import infer_loader, infer_mc_version
 from .jarscan import scan_mods_dir
 from .models import LOADERS, PackContext
@@ -43,6 +43,7 @@ class Options:
     mc: Optional[str] = None
     loader: Optional[str] = None
     side: Optional[str] = None  # client | server | both
+    launcher: Optional[str] = None  # a key from launchers.LAUNCHERS; None / "auto" = work it out
     cf_key: Optional[str] = None
     workspace_dir: Optional[Path] = None
     mrpack_hosts: Optional[set] = None  # override download allow-list (tests)
@@ -142,6 +143,7 @@ def open_folder(path: Path, opts: Options, progress: Progress = None) -> tuple:
     pack.max_mem_mb = meta.get("max_mem_mb")
     pack.disabled_count = len(disabled)
     _apply_context(pack, jars, opts, meta)
+    _apply_launcher(pack, opts, meta)
     if opts.name:
         pack.name = opts.name
     if opts.source_label:
@@ -155,13 +157,28 @@ def open_folder(path: Path, opts: Options, progress: Progress = None) -> tuple:
     return pack, jars
 
 
+def _apply_launcher(pack: PackContext, opts: Options, meta: dict) -> None:
+    """Record which launcher the pack belongs to: what the user chose, else what its files reveal."""
+    seen = launchers.DETECTED_BY_SOURCE.get(meta.get("source", ""))
+    chosen = opts.launcher if opts.launcher in launchers.KEYS and opts.launcher != launchers.AUTO else None
+    pack.launcher = chosen or seen or ""
+    if chosen and seen and chosen != seen and chosen != "server":
+        pack.notes.append(f"You chose {launchers.label(chosen)}, but this folder looks like a {launchers.label(seen)} "
+                          "instance. Your choice is used for suggestions; the folder's own files are used for the "
+                          "Minecraft version and loader.")
+
+
 def _apply_context(pack: PackContext, jars: list, opts: Options, meta: dict) -> None:
     pack.mod_count = sum(1 for j in jars if j.mods)
+    chosen_side = launchers.side_for(opts.launcher)
     if opts.side:
         pack.side = opts.side
     elif pack.root and (pack.root / "server.properties").is_file():
         pack.side = "server"
         pack.notes.append("Side set to 'server' because server.properties exists (override with --side).")
+    elif chosen_side:
+        pack.side = chosen_side
+        pack.notes.append(f"Side set to '{chosen_side}' because the launcher is {launchers.label(opts.launcher)}.")
     elif meta.get("source"):
         pack.side = "client"
     else:
@@ -336,7 +353,8 @@ def open_mrpack(path: Path, opts: Options, progress: Progress = None) -> tuple:
     if skipped:
         pack.notes.append(f"{skipped} non-mod or other-side file(s) in the pack were not downloaded.")
     _apply_context(pack, jars, opts, meta)
-    if opts.side is None:
+    _apply_launcher(pack, opts, meta)
+    if opts.side is None and not launchers.side_for(opts.launcher):
         pack.side = "both"
     if unresolved:
         pack.notes.append(f"{len(unresolved)} pack file(s) could not be fetched, so analysis is incomplete.")
@@ -418,7 +436,8 @@ def open_curseforge(path: Path, opts: Options, progress: Progress = None) -> tup
                        unresolved=unresolved, disabled_count=len(disabled))
     pack.notes.append(f"Pack downloaded into a workspace: {ws}")
     _apply_context(pack, jars, opts, meta)
-    if opts.side is None:
+    _apply_launcher(pack, opts, meta)
+    if opts.side is None and not launchers.side_for(opts.launcher):
         pack.side = "both"
     if unresolved:
         pack.notes.append(f"{len(unresolved)} pack file(s) could not be fetched, so analysis is incomplete.")

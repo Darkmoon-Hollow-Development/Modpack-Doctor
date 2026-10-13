@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
-from . import report
+from . import launchers, report
 from .models import AnalysisResult, Finding, LOADERS, SEVERITY_ORDER
 
 SEVERITY_LABEL = {"error": "Error", "warning": "Warning", "info": "Tip"}
@@ -154,6 +154,7 @@ def pack_facts(result: AnalysisResult, rules: dict) -> list:
         ("Minecraft", p.mc_version or "unknown"),
         ("Loader", loader),
         ("Side", p.side),
+        *([("Launcher", launchers.label(p.launcher))] if p.launcher else []),
         ("Mods", f"{p.mod_count}" + (f" (+{p.disabled_count} disabled)" if p.disabled_count else "")),
     ]
     ram = suggested_ram_mb(rules, p.mod_count)
@@ -366,10 +367,11 @@ class TabSpec:
     loader: str = "auto"
     side: str = "auto"
     online: bool = False
+    launcher: str = "auto"
 
     def to_dict(self) -> dict:
         return {"source": self.source, "title": self.title, "mc": self.mc, "loader": self.loader,
-                "side": self.side, "online": self.online}
+                "side": self.side, "online": self.online, "launcher": self.launcher}
 
     @staticmethod
     def from_dict(d) -> Optional["TabSpec"]:
@@ -389,7 +391,8 @@ class TabSpec:
             mc=mc.strip() if isinstance(mc, str) and re.fullmatch(r"[0-9A-Za-z.\-_+ ]{0,24}", mc.strip()) else "",
             loader=loader if loader in ("auto",) + LOADERS else "auto",
             side=side if side in SIDES else "auto",
-            online=d.get("online") is True)
+            online=d.get("online") is True,
+            launcher=d.get("launcher") if d.get("launcher") in launchers.KEYS else "auto")
 
 
 def norm_source(source: str) -> str:

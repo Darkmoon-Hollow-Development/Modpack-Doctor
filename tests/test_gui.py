@@ -138,6 +138,84 @@ class GuiTests(unittest.TestCase):
             self.wait()
         self.assertIn("offline", err.call_args[0][1])
 
+    def test_launcher_choice_is_used_remembered_and_per_tab(self):
+        self.assertEqual(self.app.launcher_var.get(), "Auto-detect")
+        self.app.launcher_var.set("CurseForge app")
+        self.analyze()
+        self.assertEqual(self.app.result.pack.launcher, "curseforge")
+        self.assertIn("CurseForge app", [v for k, v in self.gui.vm.pack_facts(self.app.result, {}) if k == "Launcher"])
+        self.app.new_tab()
+        self.assertEqual(self.app.launcher_var.get(), "Auto-detect")  # a new tab starts fresh
+        self.app.switch_to(self.app.tabs[0])
+        self.assertEqual(self.app.launcher_var.get(), "CurseForge app")
+        self.app._capture_active()
+        self.assertEqual(self.app.tabs[0].spec().launcher, "curseforge")  # saved with the tab / saved pack
+
+    def test_dialogs_start_in_the_launchers_folder(self):
+        start = Path(self.tmp.name) / "instances"
+        start.mkdir()
+        self.app.launcher_var.set("Prism / MultiMC")
+        with mock.patch.object(self.gui.launchers, "instances_folder", return_value=start), \
+                mock.patch.object(self.gui.filedialog, "askdirectory", return_value="") as ask:
+            self.app.pick_folder()
+        self.assertEqual(ask.call_args.kwargs["initialdir"], str(start))
+        self.app.launcher_var.set("Modrinth App")
+        with mock.patch.object(self.gui.filedialog, "askopenfilename", return_value="") as ask:
+            self.app.pick_file()
+        self.assertEqual(ask.call_args.kwargs["filetypes"][0], ("Modrinth pack", "*.mrpack"))
+        self.app.launcher_var.set("Auto-detect")
+        with mock.patch.object(self.gui.filedialog, "askopenfilename", return_value="") as ask:
+            self.app.pick_file()
+        self.assertEqual(ask.call_args.kwargs["filetypes"][0][0], "Modpack files")
+
+    def test_missing_mod_has_download_and_search_buttons(self):
+        self.app.launcher_var.set("CurseForge app")
+        self.analyze()
+        f = self._select("missing_dep")
+        labels = [b.cget("text") for b in self.app.fix_frame.winfo_children()]
+        self.assertTrue(any(l.startswith("Download") and "Modrinth" in l for l in labels), labels)
+        search = [b for b in self.app.fix_frame.winfo_children() if "Search" in b.cget("text")]
+        self.assertEqual(len(search), 2)
+        self.assertIn("CurseForge", search[0].cget("text"))
+        with mock.patch.object(self.gui.webbrowser, "open") as op:
+            search[0].invoke()
+        self.assertTrue(op.call_args[0][0].startswith("https://www.curseforge.com/"))
+        with mock.patch.object(self.gui.webbrowser, "open") as op:
+            self.app.open_link("file:///etc/passwd")
+            self.app.open_link("javascript:alert(1)")
+        self.assertFalse(op.called)  # only http(s) pages are ever opened
+
+    def test_download_a_mod_dialog_builds_the_install_action(self):
+        self.analyze()
+        got = {}
+
+        def fake_apply(root, actions, prog=None):
+            got["actions"] = actions
+            return {"id": "x", "entries": [], "errors": []}
+        with mock.patch.object(self.gui.simpledialog, "askstring", return_value="  Cool Lib "), \
+                mock.patch.object(self.gui.messagebox, "askokcancel", return_value=True) as ok, \
+                mock.patch.object(self.gui.messagebox, "showinfo"), mock.patch.object(self.gui.messagebox, "showwarning"), \
+                mock.patch.object(self.gui.fixer, "apply_actions", side_effect=fake_apply):
+            self.app.download_mod()
+            self.wait()
+        a = got["actions"][0]
+        self.assertEqual(a.kind, "install_project")
+        self.assertEqual((a.params["query"], a.params["mc"], a.params["loader"]), ("Cool Lib", "1.20.1", "fabric"))
+        self.assertIn("download files from Modrinth", ok.call_args[0][1])
+        with mock.patch.object(self.gui.simpledialog, "askstring", return_value="  "), \
+                mock.patch.object(self.gui.fixer, "apply_actions") as ap:
+            self.app.download_mod()
+        self.assertFalse(ap.called)  # an empty name does nothing
+
+    def test_download_a_mod_needs_known_version_and_loader(self):
+        self.analyze()
+        self.app.result.pack.loader = None
+        with mock.patch.object(self.gui.messagebox, "showinfo") as info, \
+                mock.patch.object(self.gui.simpledialog, "askstring") as ask:
+            self.app.download_mod()
+        self.assertTrue(info.called)
+        self.assertFalse(ask.called)
+
     def test_crash_tab_without_files(self):
         self.app.analyze_crash()
         self.assertIn("No crash report found", self.app.crash_text.get("1.0", "end"))

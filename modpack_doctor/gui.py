@@ -11,13 +11,14 @@ import subprocess
 import sys
 import threading
 import traceback
+import webbrowser
 from pathlib import Path
 from typing import Callable, Optional
 
 import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 
-from . import __version__, crashlog, fixer, net, pipeline, viewmodel as vm
+from . import __version__, crashlog, fixer, launchers, net, pipeline, viewmodel as vm
 from .models import LOADERS, Action, Fix
 from .rules import load_rules
 from .sources import Options, SourceError
@@ -94,6 +95,7 @@ class Tab:
         sp = spec or vm.TabSpec()
         self.source, self.custom_title = sp.source, sp.title
         self.mc, self.loader, self.side, self.online = sp.mc, sp.loader, sp.side, sp.online
+        self.launcher = sp.launcher
         self.result = None
         self.undo_groups: list = []  # one list of change-set ids per fix run (an auto-fix run spans several)
         self.attention = False  # a background task finished while this tab was not showing
@@ -101,7 +103,7 @@ class Tab:
         self.view: dict = {}  # filters / sub-tab to put back when the tab is shown again
 
     def spec(self) -> vm.TabSpec:
-        return vm.TabSpec(self.source, self.custom_title, self.mc, self.loader, self.side, self.online)
+        return vm.TabSpec(self.source, self.custom_title, self.mc, self.loader, self.side, self.online, self.launcher)
 
     def title(self) -> str:
         if self.custom_title:
@@ -143,6 +145,7 @@ class App(tk.Tk):
         self.mc_var = tk.StringVar()
         self.loader_var = tk.StringVar(value="auto")
         self.side_var = tk.StringVar(value="auto")
+        self.launcher_var = tk.StringVar(value=launchers.label(launchers.AUTO))
         self.online_var = tk.BooleanVar(value=False)
         self.restore_var = tk.BooleanVar(value=bool(self.settings.get("restore_tabs", True)))
         self.cf_var = tk.StringVar(value=os.environ.get("CURSEFORGE_API_KEY", ""))
@@ -398,6 +401,7 @@ class App(tk.Tk):
         t.add_separator()
         t.add_command(label="Open analysed folder", command=self.open_folder)
         t.add_command(label="Show ignored warnings again", command=self.show_ignored_again)
+        t.add_command(label="Download a mod...", command=self.download_mod)
         t.add_command(label="Analyze latest crash report", accelerator="Ctrl+L", command=self.analyze_crash)
         t.add_command(label="Manage disabled mods...", command=self.manage_disabled)
         t.add_separator()
@@ -473,6 +477,11 @@ class App(tk.Tk):
         self._combos.append(ttk.Combobox(r0, textvariable=self.loader_var, values=("auto",) + LOADERS, width=9,
                                          state="readonly"))
         self._combos[-1].pack(side="left", padx=(6, 14))
+        ttk.Label(r0, text="Launcher").pack(side="left")
+        self.launcher_combo = ttk.Combobox(r0, textvariable=self.launcher_var, values=tuple(launchers.LAUNCHERS.values()),
+                                           width=15, state="readonly")
+        self._combos.append(self.launcher_combo)
+        self.launcher_combo.pack(side="left", padx=(6, 14))
         ttk.Label(r0, text="Pack is for").pack(side="left")
         self._combos.append(ttk.Combobox(r0, textvariable=self.side_var, values=("auto", "client", "server", "both"),
                                          width=8, state="readonly"))
@@ -852,6 +861,7 @@ class App(tk.Tk):
         t = self.tab
         t.source, t.mc = self.src_var.get(), self.mc_var.get()
         t.loader, t.side, t.online = self.loader_var.get(), self.side_var.get(), bool(self.online_var.get())
+        t.launcher = launchers.key_for_label(self.launcher_var.get())
         try:
             inner = self.notebook.index(self.notebook.select())
         except tk.TclError:
@@ -870,6 +880,7 @@ class App(tk.Tk):
             self.mc_var.set(t.mc)
             self.loader_var.set(t.loader)
             self.side_var.set(t.side)
+            self.launcher_var.set(launchers.label(t.launcher))
             self.online_var.set(t.online)
             for k, var in self.sev_vars.items():
                 var.set(bool(v.get("sev", {}).get(k, True)))
@@ -1027,6 +1038,7 @@ class App(tk.Tk):
         if not cur.source.strip() and cur.result is None:  # an empty tab is reused rather than left behind
             cur.source, cur.custom_title, cur.mc = spec.source, spec.title, spec.mc
             cur.loader, cur.side, cur.online = spec.loader, spec.side, spec.online
+            cur.launcher = spec.launcher
             self._restore_active()
             self._after_tab_change()
             return cur
@@ -1244,19 +1256,28 @@ class App(tk.Tk):
         refresh()
 
     # ------------------------------------------------------------------ choosing sources
+    def _dialog_start_dir(self) -> str:
+        """Where a file dialog should open: the chosen launcher's instances folder if there is one, else last used."""
+        found = launchers.instances_folder(launchers.key_for_label(self.launcher_var.get()))
+        return str(found) if found else (self.settings.get("last_dir") or str(Path.home()))
+
     def pick_folder(self) -> None:
         d = filedialog.askdirectory(title="Choose the instance folder (the one that contains 'mods')",
-                                    initialdir=self.settings.get("last_dir") or str(Path.home()))
+                                    initialdir=self._dialog_start_dir())
         if d:
             self.settings["last_dir"] = d
             self.open_in_tab(d)
             self.analyze()
 
     def pick_file(self) -> None:
+        types = [("Modpack files", "*.mrpack *.zip"), ("Modrinth pack", "*.mrpack"), ("CurseForge pack", "*.zip"),
+                 ("All files", "*.*")]
+        pref = launchers.pack_file_type(launchers.key_for_label(self.launcher_var.get()))
+        if pref:  # the launcher's own pack type first, so it is the one selected in the dialog
+            types = [pref] + [t for t in types if t != pref]
         f = filedialog.askopenfilename(
             title="Choose a modpack file", initialdir=self.settings.get("last_dir") or str(Path.home()),
-            filetypes=[("Modpack files", "*.mrpack *.zip"), ("Modrinth pack", "*.mrpack"), ("CurseForge pack", "*.zip"),
-                       ("All files", "*.*")])
+            filetypes=types)
         if f:
             self.settings["last_dir"] = str(Path(f).parent)
             self.open_in_tab(f)
@@ -1339,8 +1360,10 @@ class App(tk.Tk):
     def _build_options(self) -> Options:
         loader = self.loader_var.get()
         side = self.side_var.get()
+        launcher = launchers.key_for_label(self.launcher_var.get())
         return Options(mc=self.mc_var.get().strip() or None, loader=None if loader == "auto" else loader,
-                       side=None if side == "auto" else side, cf_key=self.cf_var.get().strip() or None)
+                       side=None if side == "auto" else side, launcher=None if launcher == launchers.AUTO else launcher,
+                       cf_key=self.cf_var.get().strip() or None)
 
     def _save_settings(self) -> None:
         for old in ("source", "mc", "loader", "side", "online"):  # per-tab now (older versions stored them here)
@@ -1461,8 +1484,11 @@ class App(tk.Tk):
         can_root = bool(folders.get("pack"))
         self._set_menu(self.menu_tools, "Analyze latest crash report", can_root)
         self._set_menu(self.menu_tools, "Manage disabled mods...", bool(has and can_fix))
+        self._set_menu(self.menu_tools, "Download a mod...", bool(has and can_fix))
         self.crash_btn.state(["!disabled"] if can_root else ["disabled"])
         for b in self.fix_frame.winfo_children():
+            if getattr(b, "always_on", False):
+                continue
             b.state(["!disabled"] if can_fix else ["disabled"])
 
     @staticmethod
@@ -1541,6 +1567,10 @@ class App(tk.Tk):
             if len(label) > 120:
                 label = label[:117] + "..."
             self._btn(self.fix_frame, label, lambda fx=fx: self._apply([fx]), pady=8).pack(fill="x", pady=2)
+        for text, url in f.links:
+            b = self._btn(self.fix_frame, f"{text} (opens your browser)", lambda u=url: self.open_link(u), pady=6)
+            b.always_on = True  # type: ignore[attr-defined]  # a web search never needs the pack to be idle
+            b.pack(fill="x", pady=2)
         self._current_finding = f
         has_root = self.result is not None and self.result.pack.root is not None
         self.dev_btns[0].state(["!disabled"] if (f.files and has_root) else ["disabled"])
@@ -2031,6 +2061,34 @@ class App(tk.Tk):
                     fx = Fix(f"Disable {Path(s.jar).name}", [Action("disable_mod", {"file": s.jar})])
                     self._btn(self.crash_fix_frame, fx.label, lambda fx=fx: self._apply([fx]),
                               padx=10, pady=5).pack(side="left", padx=(0, 6))
+
+    # ------------------------------------------------------------------ downloading mods
+    @staticmethod
+    def open_link(url: str) -> None:
+        """Open a web page in the browser (only http(s) links are ever opened)."""
+        if url.lower().startswith(("https://", "http://")):
+            webbrowser.open(url)
+
+    def download_mod(self) -> None:
+        """Ask for a mod's name and download the best matching build from Modrinth into the pack's mods folder."""
+        res = self.result
+        if res is None or res.pack.root is None or self.busy:
+            return
+        pack = res.pack
+        if not pack.loader or not pack.mc_version:
+            messagebox.showinfo("Modpack Doctor", "The Minecraft version and the loader of this pack must be known to "
+                                "pick the right build. Fill them in at the top of the window, press Analyze, then try again.")
+            return
+        name = simpledialog.askstring(
+            "Download a mod", f"Name (or Modrinth slug) of the mod to download for Minecraft {pack.mc_version} "
+            f"({pack.loader}).\nIt is verified against Modrinth's hashes and saved in the pack's mods folder.", parent=self)
+        name = (name or "").strip()
+        if not name:
+            return
+        fx = Fix(f'Download "{name}" to your pack from Modrinth',
+                 [Action("install_project", {"query": name, "slug": None, "mc": pack.mc_version, "loader": pack.loader,
+                                             "display": name})], needs_network=True)
+        self._apply([fx])
 
     # ------------------------------------------------------------------ disabled mods
     def manage_disabled(self) -> None:

@@ -224,6 +224,30 @@ class AnalyzerTests(unittest.TestCase):
         self.assertTrue(sod.fixes[0].label.startswith("Keep embeddium"))
         self.assertTrue(any(f.code == "rule_redundant" and "jei" in f.title for f in res.findings))
 
+    def _two_mod_jar(self, path, ids):
+        toml = 'modLoader="javafml"\nloaderVersion="[47,)"\nlicense="MIT"\n' + "".join(
+            f'\n[[mods]]\nmodId="{i}"\nversion="1.0"\n' for i in ids)
+        path.write_bytes(fakepack._zip_bytes({"META-INF/mods.toml": toml}))
+
+    def test_one_jar_declaring_two_ids_is_not_overlap(self):
+        # Embeddium's jar also declares "rubidium" for compatibility: that is ONE mod installed, not two.
+        d = Path(tempfile.mkdtemp()) / "i"
+        (d / "mods").mkdir(parents=True)
+        self._two_mod_jar(d / "mods" / "embeddium-0.3.jar", ["embeddium", "rubidium"])
+        res = pipeline.run_analysis(str(d), Options(mc="1.20.1", loader="forge"))
+        self.assertEqual([f for f in res.findings if f.code in ("rule_redundant", "rule_conflict")], [])
+
+    def test_real_overlap_still_reported_when_jars_differ(self):
+        d = Path(tempfile.mkdtemp()) / "i"
+        (d / "mods").mkdir(parents=True)
+        self._two_mod_jar(d / "mods" / "embeddium-0.3.jar", ["embeddium", "rubidium"])
+        fakepack.forge_jar(d / "mods" / "rubidium-0.7.jar", "rubidium", "0.7", [])
+        res = pipeline.run_analysis(str(d), Options(mc="1.20.1", loader="forge"))
+        red = [f for f in res.findings if f.code == "rule_redundant"]
+        self.assertEqual(len(red), 1)
+        self.assertEqual(sorted(red[0].mods), ["embeddium", "rubidium"])
+        self.assertEqual(len(red[0].files), 2)
+
 
 class FixerTests(unittest.TestCase):
     def setUp(self):
