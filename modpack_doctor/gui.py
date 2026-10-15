@@ -119,7 +119,7 @@ class App(tk.Tk):
         ``autoscan``: analyse the active tab at start-up if it is a local folder (cheap, no network)."""
         super().__init__()
         self.title("Modpack Doctor")
-        self.geometry("1200x820")
+        self.geometry("1240x840")
         self.minsize(960, 720)
         self._set_icon()
 
@@ -156,10 +156,14 @@ class App(tk.Tk):
         self.mod_search_var = tk.StringVar()
         self.mod_issue_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Ready. Choose a modpack to analyse.")
-        theme = self.settings.get("theme", "System")
+        theme = self.settings.get("theme", "Minecraft")
+        if self.settings.get("ui_version") != 2:  # first run of the Minecraft redesign: older saved themes must not hide it
+            theme = "Minecraft"
+            self.settings["ui_version"] = 2
         self.theme_var = tk.StringVar(value=theme if theme in vm.THEME_CHOICES else "System")
         self.pal = vm.PALETTES[vm.resolve_theme(self.theme_var.get())]
         self.bg = self.pal["bg"]
+        self.options_var = tk.BooleanVar(value=bool(self.settings.get("show_options", True)))
         self._score_shown: Optional[int] = None
         self._themed_texts: list = []
         self._combos: list = []
@@ -236,6 +240,11 @@ class App(tk.Tk):
         self.f_small = base.copy()
         self.f_small.configure(size=max(8, base.cget("size") - 1))
         self.f_mono = tkfont.nametofont("TkFixedFont").copy()
+        self._ui_family = base.cget("family")
+        have = {f.lower(): f for f in tkfont.families(self)}
+        self._block_family = next((have[n.lower()] for n in ("Cascadia Mono", "Consolas", "Lucida Console",
+                                                              "DejaVu Sans Mono", "Liberation Mono", "Courier New")
+                                   if n.lower() in have), self.f_mono.cget("family"))
         rowh = base.metrics("linespace") + 11
         st.configure("Treeview", rowheight=rowh, borderwidth=0, relief="flat")
         st.configure("Treeview.Heading", font=self.f_bold, padding=(8, 7), relief="flat", borderwidth=0)
@@ -252,10 +261,20 @@ class App(tk.Tk):
         st.configure("Count.TLabel", font=self.f_bold)
         st.configure("Section.TLabel", font=self.f_small)
 
+    def _apply_fonts(self, blocky: bool) -> None:
+        """The Minecraft theme uses a chunky monospaced face; the other themes use the platform's UI font."""
+        fam = self._block_family if blocky else self._ui_family
+        for f in (tkfont.nametofont(n) for n in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont")):
+            f.configure(family=fam)
+        for f in (self.f_bold, self.f_h1, self.f_big, self.f_small):
+            f.configure(family=fam)
+        ttk.Style(self).configure("Treeview", rowheight=self.f_base.metrics("linespace") + 11)
+
     def _apply_theme(self) -> None:
         """(Re)colour every widget from the palette chosen in the Theme selector."""
         p = self.pal = vm.PALETTES[vm.resolve_theme(self.theme_var.get())]
         self.bg = p["bg"]
+        self._apply_fonts(bool(p.get("blocky")))
         st = ttk.Style(self)
         self.configure(background=p["page"])
         st.configure(".", background=p["bg"], foreground=p["fg"], bordercolor=p["border"], lightcolor=p["bg"],
@@ -389,6 +408,7 @@ class App(tk.Tk):
         f.add_separator()
         f.add_command(label="Export report...", accelerator="Ctrl+S", command=self.export)
         f.add_command(label="Copy report as Markdown", command=self.copy_report)
+        f.add_command(label="Copy support summary", command=self.copy_summary)
         f.add_command(label="Export mod list...", command=self.export_mod_list)
         f.add_command(label="Save mod list as .txt...", command=self.export_mod_txt)
         f.add_separator()
@@ -402,6 +422,7 @@ class App(tk.Tk):
         t.add_command(label="Open analysed folder", command=self.open_folder)
         t.add_command(label="Show ignored warnings again", command=self.show_ignored_again)
         t.add_command(label="Download a mod...", command=self.download_mod)
+        t.add_command(label="Back up configs and mod list", command=self.backup_configs)
         t.add_command(label="Analyze latest crash report", accelerator="Ctrl+L", command=self.analyze_crash)
         t.add_command(label="Manage disabled mods...", command=self.manage_disabled)
         t.add_separator()
@@ -447,7 +468,7 @@ class App(tk.Tk):
         return f
 
     def _build_header(self) -> None:
-        card = self._card(self, fit=True, height=60)
+        card = self.header_card = self._card(self, fit=True, height=60)
         card.pack(fill="x", padx=12, pady=(2, 0))
         head = ttk.Frame(card.body)
         head.pack(fill="x")
@@ -466,9 +487,17 @@ class App(tk.Tk):
         self.analyze_btn.grid(row=0, column=5, padx=(14, 0))
         self.autofix_btn = self._btn(head, "Auto-fix pack", self.auto_fix, kind="accent", padx=20)
         self.autofix_btn.grid(row=0, column=6, padx=(8, 0))
+        self.options_btn = self._btn(head, "Options", self._toggle_options, arrow=True)
+        self.options_btn.always_on = True
+        self.options_btn.grid(row=0, column=7, padx=(8, 0))
 
-        opt = ttk.Frame(card.body)
+        # The settings rows live in a wrapper whose height is animated, so hiding them slides the rest of the window up.
+        self.options_wrap = ttk.Frame(card.body)
+        self._opt_anim = None
+        opt = self.options_frame = ttk.Frame(self.options_wrap)
         opt.pack(fill="x", pady=(12, 0))
+        if self.options_var.get():
+            self.options_wrap.pack(fill="x")
         r0 = ttk.Frame(opt)
         r0.pack(fill="x")
         ttk.Label(r0, text="Minecraft").pack(side="left")
@@ -487,19 +516,57 @@ class App(tk.Tk):
                                          width=8, state="readonly"))
         self._combos[-1].pack(side="left", padx=(6, 14))
         ttk.Checkbutton(r0, text="Check Modrinth for updates (online)", variable=self.online_var).pack(side="left")
-        theme_cb = ttk.Combobox(r0, textvariable=self.theme_var, values=vm.THEME_CHOICES, width=8, state="readonly")
-        theme_cb.pack(side="right")
-        theme_cb.bind("<<ComboboxSelected>>", lambda e: self._on_theme_change())
-        self._combos.append(theme_cb)
-        ttk.Label(r0, text="Theme").pack(side="right", padx=(0, 6))
         r1 = ttk.Frame(opt)
         r1.pack(fill="x", pady=(8, 0))
         ttk.Label(r1, text="CurseForge API key").pack(side="left")
         ttk.Entry(r1, textvariable=self.cf_var, show="\u2022", width=26).pack(side="left", padx=(6, 4))
-        ttk.Label(r1, text="(only for CurseForge packs, not saved)", style="Muted.TLabel").pack(side="left", padx=(0, 14))
+        ttk.Label(r1, text="(CurseForge packs only)", style="Muted.TLabel").pack(side="left", padx=(0, 14))
         ttk.Label(r1, text="Extra rules file").pack(side="left")
         ttk.Entry(r1, textvariable=self.rules_var).pack(side="left", fill="x", expand=True, padx=(6, 8))
         self._btn(r1, "Browse...", self.pick_rules, pady=5).pack(side="left")
+        ttk.Label(r1, text="Theme").pack(side="left", padx=(14, 6))
+        theme_cb = ttk.Combobox(r1, textvariable=self.theme_var, values=vm.THEME_CHOICES, width=14, state="readonly")
+        theme_cb.pack(side="left")
+        theme_cb.bind("<<ComboboxSelected>>", lambda e: self._on_theme_change())
+        self._combos.append(theme_cb)
+
+    def _toggle_options(self) -> None:
+        """Slide the pack-settings rows up out of view (or back down); the choice is remembered."""
+        if self._opt_anim is not None:
+            return
+        show = not self.options_var.get()
+        self.options_var.set(show)
+        self._save_settings()
+        wrap = self.options_wrap
+        self.update_idletasks()
+        full = self.options_frame.winfo_reqheight() + 12
+        if show:
+            wrap.pack_propagate(False)
+            wrap.configure(height=1)
+            wrap.pack(fill="x")
+        else:
+            wrap.pack_propagate(False)
+            wrap.configure(height=full)
+        import time
+        began, duration = time.perf_counter(), 0.10
+
+        def step() -> None:
+            # Time-based (not step-based) so it stays smooth however fast or slow the machine redraws.
+            t = min(1.0, (time.perf_counter() - began) / duration)
+            ease = 4 * t ** 3 if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2  # ease-in-out cubic
+            frac = ease if show else 1 - ease
+            wrap.configure(height=max(1, int(round(full * frac))))
+            self.header_card._on_body()  # the card is as tall as its content, so the panels below slide with it
+            if t < 1.0:
+                self._opt_anim = self.after(16, step)  # about 60 frames per second
+                return
+            self._opt_anim = None
+            wrap.pack_propagate(True)
+            if not show:
+                wrap.pack_forget()
+            self.update_idletasks()
+            self.header_card._on_body()
+        self._opt_anim = self.after(0, step)
 
     def _popup_below(self, menu: tk.Menu, widget) -> None:
         try:
@@ -511,14 +578,14 @@ class App(tk.Tk):
     def _build_body(self) -> None:
         body = self._body = self._page_frame(self)
         body.pack(fill="both", expand=True, padx=12, pady=(0, 0))
-        body.columnconfigure(1, weight=1)
+        body.columnconfigure(0, weight=1)
         body.rowconfigure(0, weight=1)
-        left = self._card(body, width=300)
-        left.grid(row=0, column=0, sticky="ns")
-        left.grid_propagate(False)
-        self._build_summary(left.body)
+        side = self._card(body, width=300)  # the pack-health panel sits on the right of the findings
+        side.grid(row=0, column=1, sticky="ns")
+        side.grid_propagate(False)
+        self._build_summary(side.body)
         main = self._card(body)
-        main.grid(row=0, column=1, sticky="nsew")
+        main.grid(row=0, column=0, sticky="nsew")
         right = PillNotebook(main.body, self.pal, self.f_base)
         right.pack(fill="both", expand=True)
         self.notebook = right
@@ -529,7 +596,7 @@ class App(tk.Tk):
 
     def _build_summary(self, parent) -> None:
         box = parent
-        self.gauge = tk.Canvas(box, width=150, height=150, highlightthickness=0, bg=self.bg)
+        self.gauge = tk.Canvas(box, width=260, height=150, highlightthickness=0, bg=self.bg)
         self.gauge.pack(pady=(2, 0))
         self.verdict_lbl = ttk.Label(box, text="", wraplength=230, justify="center", font=self.f_bold)
         self.verdict_lbl.pack(pady=(0, 6))
@@ -548,6 +615,8 @@ class App(tk.Tk):
         self.undo_btn.pack(fill="x")
         self.export_btn = self._btn(box, "Export report...", self.export)
         self.export_btn.pack(fill="x", pady=(6, 0))
+        self.summary_btn = self._btn(box, "Copy support summary", self.copy_summary)
+        self.summary_btn.pack(fill="x", pady=(6, 0))
         ttk.Label(box, text="OPEN FOLDER", style="Section.TLabel").pack(anchor="w", pady=(12, 4))
         row = ttk.Frame(box)
         row.pack(fill="x")
@@ -564,16 +633,60 @@ class App(tk.Tk):
         c = self.gauge
         c.delete("all")
         self._score_shown = score
-        a, b = 14, 136
-        c.create_oval(a, a, b, b, outline=self.pal["trough"], width=12)
+        if self.pal.get("blocky"):
+            self._draw_hearts(score)
+            return
+        a, b = 14 + 55, 136 + 55
+        cx = 130
+        c.create_oval(a, 14, b, 136, outline=self.pal["trough"], width=12)
         if score is None:
-            c.create_text(75, 75, text="--", font=self.f_big, fill=self.pal["muted"])
+            c.create_text(cx, 75, text="--", font=self.f_big, fill=self.pal["muted"])
             return
         color = vm.score_color(score)
         if score > 0:
-            c.create_arc(a, a, b, b, start=90, extent=-359.9 * score / 100, style="arc", outline=color, width=12)
-        c.create_text(75, 66, text=str(score), font=self.f_big, fill=color)
-        c.create_text(75, 100, text="health score", fill=self.pal["muted"])
+            c.create_arc(a, 14, b, 136, start=90, extent=-359.9 * score / 100, style="arc", outline=color, width=12)
+        c.create_text(cx, 66, text=str(score), font=self.f_big, fill=color)
+        c.create_text(cx, 100, text="health score", fill=self.pal["muted"])
+
+    HEART = ("..XX...XX..", ".XXXX.XXXX.", "XXXXXXXXXXX", "XXXXXXXXXXX", ".XXXXXXXXX.", "..XXXXXXX..", "...XXXXX...",
+             "....XXX....", ".....X.....")
+
+    def _draw_hearts(self, score: Optional[int]) -> None:
+        """Minecraft-style health bar: ten pixel hearts (two rows of five), one heart per 10 points."""
+        c, px = self.gauge, 3
+        w = len(self.HEART[0]) * px
+        gap = 8
+        x0 = (260 - (5 * w + 4 * gap)) / 2
+        halves = 0 if score is None else max(0, min(20, round(score / 5)))
+        for i in range(10):
+            col, row = i % 5, i // 5
+            x, y = x0 + col * (w + gap), 6 + row * (len(self.HEART) * px + 8)
+            full = halves >= 2 * (i + 1)
+            half = not full and halves == 2 * i + 1
+            for dx, dy in ((-px, 0), (px, 0), (0, -px), (0, px)):  # black outline
+                self._heart_cells(x + dx, y + dy, px, lambda r, k: "#000000")
+            mid = len(self.HEART[0]) // 2
+
+            def shade(r, k, full=full, half=half, mid=mid):
+                lit = full or (half and k <= mid)
+                if r == 1 and k in (1, 2):
+                    return "#ff9a9a" if lit else "#5a5a5a"
+                return "#d62828" if lit else "#3a3a3a"
+            self._heart_cells(x, y, px, shade)
+        if score is None:
+            c.create_text(130, 112, text="--", font=self.f_big, fill=self.pal["muted"])
+            return
+        color = vm.score_color(score)
+        c.create_text(131, 113, text=str(score), font=self.f_big, fill="#000000")
+        c.create_text(130, 112, text=str(score), font=self.f_big, fill=color)
+        c.create_text(130, 139, text="health score", fill=self.pal["muted"])
+
+    def _heart_cells(self, x: float, y: float, px: int, color) -> None:
+        for r, line in enumerate(self.HEART):
+            for k, ch in enumerate(line):
+                if ch == "X":
+                    self.gauge.create_rectangle(x + k * px, y + r * px, x + (k + 1) * px, y + (r + 1) * px,
+                                                fill=color(r, k), outline="")
 
     def _build_findings_tab(self, nb) -> None:
         tab = ttk.Frame(nb, padding=(0, 8, 0, 0))
@@ -613,7 +726,7 @@ class App(tk.Tk):
         pane.add(top, weight=1)
         cols = ("sev", "cat", "title")
         self.tree = ttk.Treeview(top, columns=cols, show="headings", selectmode="browse", height=6)
-        for c, text, w, stretch in (("sev", "Severity", 80, False), ("cat", "Category", 190, False), ("title", "What was found", 600, True)):
+        for c, text, w, stretch in (("sev", "Severity", 96, False), ("cat", "Category", 240, False), ("title", "What was found", 600, True)):
             self.tree.heading(c, text=text)
             self.tree.column(c, width=w, minwidth=60, stretch=stretch)
         sb = ttk.Scrollbar(top, orient="vertical", command=self.tree.yview)
@@ -662,15 +775,21 @@ class App(tk.Tk):
         ttk.Checkbutton(bar, text="Only mods with findings", variable=self.mod_issue_var,
                         command=self._refresh_mods).pack(side="left")
         self.mod_search_var.trace_add("write", lambda *a: self._refresh_mods())
-        self.mods_export_btn = self._btn(bar, "Export list...", self.export_mod_list, padx=10, pady=3)
-        self.mods_export_btn.pack(side="right", padx=(8, 0))
-        self.mods_txt_btn = self._btn(bar, "Save as .txt", self.export_mod_txt, padx=10, pady=3)
-        self.mods_txt_btn.pack(side="right", padx=(8, 0))
         self.mods_lbl = ttk.Label(bar, text="", style="Muted.TLabel")
         self.mods_lbl.pack(side="right")
+        bar2 = ttk.Frame(tab)
+        bar2.pack(fill="x", pady=(8, 0))
+        self.mods_find_btn = self._btn(bar2, "Find online", self.find_selected_mod, padx=10, pady=3)
+        self.mods_find_btn.pack(side="left", padx=(0, 8))
+        self.mods_copy_btn = self._btn(bar2, "Copy list", self.copy_mod_list, padx=10, pady=3)
+        self.mods_copy_btn.pack(side="left", padx=(0, 8))
+        self.mods_txt_btn = self._btn(bar2, "Save as .txt", self.export_mod_txt, padx=10, pady=3)
+        self.mods_txt_btn.pack(side="left", padx=(0, 8))
+        self.mods_export_btn = self._btn(bar2, "Export list...", self.export_mod_list, padx=10, pady=3)
+        self.mods_export_btn.pack(side="left")
         cols = ("name", "mod_id", "version", "loader", "side", "file", "issue")
         heads = {"name": ("Name", 160), "mod_id": ("Mod id", 140), "version": ("Version", 90), "loader": ("Loader", 78),
-                 "side": ("Side", 50), "file": ("File", 250), "issue": ("Issue", 70)}
+                 "side": ("Side", 66), "file": ("File", 250), "issue": ("Issue", 70)}
         frame = ttk.Frame(tab)
         frame.pack(fill="both", expand=True, pady=(8, 0))
         self.mod_tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
@@ -1369,7 +1488,8 @@ class App(tk.Tk):
         for old in ("source", "mc", "loader", "side", "online"):  # per-tab now (older versions stored them here)
             self.settings.pop(old, None)
         self.settings.update(rules=self.rules_var.get().strip(), theme=self.theme_var.get(),
-                             restore_tabs=bool(self.restore_var.get()))
+                             restore_tabs=bool(self.restore_var.get()),
+                             show_options=bool(self.options_var.get()), ui_version=2)
         vm.save_settings(self.settings)
 
     def analyze(self, then_autofix: bool = False) -> None:
@@ -1485,6 +1605,11 @@ class App(tk.Tk):
         self._set_menu(self.menu_tools, "Analyze latest crash report", can_root)
         self._set_menu(self.menu_tools, "Manage disabled mods...", bool(has and can_fix))
         self._set_menu(self.menu_tools, "Download a mod...", bool(has and can_fix))
+        self._set_menu(self.menu_tools, "Back up configs and mod list", bool(has and res.pack.root is not None))
+        self._set_menu(self.menu_file, "Copy support summary", has)
+        self.summary_btn.state(["!disabled"] if has else ["disabled"])
+        self.mods_copy_btn.state(["!disabled"] if has else ["disabled"])
+        self.mods_find_btn.state(["!disabled"] if has else ["disabled"])
         self.crash_btn.state(["!disabled"] if can_root else ["disabled"])
         for b in self.fix_frame.winfo_children():
             if getattr(b, "always_on", False):
@@ -1748,6 +1873,47 @@ class App(tk.Tk):
             messagebox.showerror("Modpack Doctor", f"Could not write the report:\n{e}")
             return
         self.status_var.set(f"Report saved to {path}")
+
+    def copy_summary(self) -> None:
+        """Put a short, paste-ready summary (pack, versions, health, top findings) on the clipboard."""
+        if self.result is None:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(vm.support_summary(self.result))
+        self.status_var.set("Support summary copied. Paste it into Discord, a forum post or a bug report.")
+
+    def copy_mod_list(self) -> None:
+        if self.result is None:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(vm.render_mod_list(self.result, "txt"))
+        self.status_var.set(f"Copied the list of {len(vm.mod_rows(self.result))} mods to the clipboard.")
+
+    def find_selected_mod(self) -> None:
+        """Search for the selected mod on the launcher's own site (Modrinth or CurseForge)."""
+        sel = self.mod_tree.selection()
+        if not sel or self.result is None:
+            messagebox.showinfo("Modpack Doctor", "Select a mod in the list first.")
+            return
+        vals = self.mod_tree.item(sel[0], "values")
+        query = str(vals[0] or vals[1]).strip()
+        links = launchers.search_links(query, self.result.pack.launcher)
+        if links:
+            self.open_link(links[0][1])
+            self.status_var.set(f"Searching for {query} online...")
+
+    def backup_configs(self) -> None:
+        """Zip the config folders and a list of the mods so a pack can be put back the way it was."""
+        res = self.result
+        if res is None or res.pack.root is None:
+            return
+        try:
+            path, n = fixer.backup_configs(res.pack.root, vm.render_mod_list(res, "txt"))
+        except OSError as e:
+            messagebox.showerror("Modpack Doctor", f"Could not create the backup:\n{e}")
+            return
+        self.status_var.set(f"Backed up {n} files to {path}")
+        messagebox.showinfo("Backup created", f"Saved {n} files (configs, settings and a mod list) to:\n{path}")
 
     def copy_report(self) -> None:
         if self.result is None:

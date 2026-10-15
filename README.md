@@ -18,7 +18,7 @@ Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MI
 - **Auto-fix** applies the safe fixes for you. Mods are never deleted (they are renamed to `.jar.disabled`), config files
   are backed up first, and everything can be **undone**.
 - Keeps several packs open in **tabs**, remembers them, and lets you **save packs** for one-click re-opening.
-- Light and dark mode.
+- A **Minecraft look** by default (blocky bevelled panels, a pixel heart health bar), plus Light, Dark and System themes.
 
 ---
 
@@ -135,12 +135,22 @@ Packs from files are unpacked into `~/ModpackDoctor/workspaces/`. Your original 
 - Your tabs **come back when you reopen the app** (File > *Reopen my tabs on startup* turns this off).
 - **Saved packs** (button next to *Pack file...*, or **Ctrl+D**) remembers a pack and its settings under a name you choose.
   A **Recent** list keeps the last ten.
-- **Mods / Config / Pack** buttons (left panel, **Ctrl+M** and **Ctrl+Shift+C**) open those folders in your file manager.
+- **Mods / Config / Pack** buttons (health panel on the right, **Ctrl+M** and **Ctrl+Shift+C**) open those folders in your file manager.
 
 ### Options
 
 Leave **Minecraft**, **Loader** and **Pack is for** on *auto* unless the result looks wrong. Tick **Check Modrinth for updates**
-to also look for newer builds and replacements online. Choose **System / Light / Dark** with the *Theme* box.
+to also look for newer builds and replacements online. Choose **Minecraft / System / Light / Dark** with the
+*Theme* box. The **Options** button next to *Auto-fix pack* slides these settings rows up out of the way (or back down) to give the findings more room.
+
+### Handy extras
+
+- **Copy support summary** (right panel, or *File*) puts a short paste-ready summary on the clipboard: pack, versions, health
+  score and the worst problems. Good for Discord and forum help requests.
+- **Mods tab:** select a mod and click **Find online** to search for it on your launcher's site, or **Copy list** to put the
+  whole mod list on the clipboard.
+- **Tools > Back up configs and mod list** zips the `config`, `defaultconfigs`, `kubejs`, `scripts` and `shaderpacks` folders,
+  `options.txt` and a text list of the mods into `.modpack_doctor/backups/` (the mod jars themselves are not copied).
 
 ---
 

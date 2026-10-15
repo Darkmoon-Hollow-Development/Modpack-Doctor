@@ -488,7 +488,7 @@ class GuiTests(unittest.TestCase):
     def test_bad_theme_in_settings_falls_back_to_system(self):
         vm = self.gui.vm
         self.app.destroy()
-        vm.save_settings({"theme": "Neon"})
+        vm.save_settings({"theme": "Neon", "ui_version": 2})
         with mock.patch.object(vm, "system_prefers_dark", return_value=False):
             self.app = self.gui.App()
         self.assertEqual(self.app.theme_var.get(), "System")

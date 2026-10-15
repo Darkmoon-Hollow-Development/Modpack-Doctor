@@ -377,3 +377,43 @@ def undo(root: Path, cs_id: Optional[str] = None) -> dict:
     cs["undo_problems"] = problems
     (root / STATE_DIR / "changesets" / f"{cs['id']}.json").write_text(json.dumps(cs, indent=2), encoding="utf-8")
     return cs
+
+
+# Folders worth keeping when a user wants a quick "before I tinker" copy. The mods themselves are big and are never
+# changed destructively by this tool, so only their names go into the backup.
+BACKUP_DIRS = ("config", "defaultconfigs", "kubejs", "scripts", "shaderpacks")
+BACKUP_FILES = ("options.txt", "servers.dat", "server.properties")
+
+
+def backup_configs(root: Path, mod_list: str = "", dest_dir: Optional[Path] = None) -> tuple:
+    """Zip the pack's config folders (plus settings files and a text list of the mods) into
+    ``.modpack_doctor/backups/``. Returns (zip path, number of files stored)."""
+    import zipfile
+    root = Path(root)
+    dest_dir = Path(dest_dir) if dest_dir else _state(root) / "backups"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    out = dest_dir / f"configs-{stamp}.zip"
+    n = 1
+    while out.exists():
+        n += 1
+        out = dest_dir / f"configs-{stamp}-{n}.zip"
+    count = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for d in BACKUP_DIRS:
+            base = root / d
+            if not base.is_dir():
+                continue
+            for p in sorted(base.rglob("*")):
+                if p.is_file() and not p.is_symlink():
+                    z.write(p, p.relative_to(root).as_posix())
+                    count += 1
+        for fname in BACKUP_FILES:
+            p = root / fname
+            if p.is_file():
+                z.write(p, fname)
+                count += 1
+        if mod_list:
+            z.writestr("mod-list.txt", mod_list)
+            count += 1
+    return out, count

@@ -25,6 +25,20 @@ def round_rect(cv: tk.Canvas, x1, y1, x2, y2, r, **kw):
     return cv.create_polygon(pts, smooth=True, **kw)
 
 
+def bevel_rect(cv: tk.Canvas, x1, y1, x2, y2, fill: str, hi: str, lo: str, edge: str, *, inset: bool = False,
+               tags: str = "", t: int = 2):
+    """A square, blocky panel: dark outline, flat fill and a light/dark bevel (swapped when ``inset``)."""
+    light, dark = (lo, hi) if inset else (hi, lo)
+    cv.create_rectangle(x1, y1, x2, y2, fill=edge, outline="", tags=tags)
+    x1, y1, x2, y2 = x1 + 1, y1 + 1, x2 - 1, y2 - 1
+    cv.create_rectangle(x1, y1, x2, y2, fill=fill, outline="", tags=tags)
+    cv.create_rectangle(x1, y1, x2, y1 + t, fill=light, outline="", tags=tags)
+    cv.create_rectangle(x1, y1, x1 + t, y2, fill=light, outline="", tags=tags)
+    cv.create_rectangle(x1, y2 - t, x2, y2, fill=dark, outline="", tags=tags)
+    cv.create_rectangle(x2 - t, y1, x2, y2, fill=dark, outline="", tags=tags)
+    cv.create_rectangle(x1 + t, y1 + t, x2 - t, y2 - t, fill=fill, outline="", tags=tags)
+
+
 class Card(tk.Canvas):
     """A white rounded panel with a soft shadow. Put content in ``card.body`` (a ttk.Frame).
 
@@ -56,6 +70,10 @@ class Card(tk.Canvas):
     def _draw(self, w: int, h: int) -> None:
         self.delete("card")
         p, s = self.pal, self.SHADOW
+        if p.get("blocky"):
+            bevel_rect(self, 1, 1, w - 1, h - 1, p["bg"], p["hi"], p["lo"], p["edge"], tags="card", t=3)
+            self.tag_lower("card")
+            return
         for i, a in enumerate((0.05, 0.07, 0.09)):  # a few stacked outlines fake a blurred shadow
             g = s - i * 2
             round_rect(self, s - g + 1, s - g + 3, w - s + g - 1, h - s + g + 1, self.radius + g,
@@ -171,6 +189,7 @@ class RoundButton(tk.Canvas):
     def restyle(self, pal: dict) -> None:
         self.pal = pal
         super().configure(bg=pal["page"] if self.on_page else pal["bg"])
+        self._size()  # the font may have changed with the theme
         self._draw()
 
     def _colors(self):
@@ -195,6 +214,9 @@ class RoundButton(tk.Canvas):
         self.delete("all")
         w, h = max(2, self.winfo_width()), max(2, self.winfo_height())
         fill, fg = self._colors()
+        if self.pal.get("blocky"):
+            self._draw_blocky(w, h, fill, fg)
+            return
         outline = self.pal["accent"] if self._focus and not self._disabled else ""
         round_rect(self, 1, 1, w - 1, h - 1, self.radius, fill=fill, outline=outline, width=2 if outline else 1)
         cx = w / 2 - (7 if self.arrow else 0)
@@ -202,6 +224,24 @@ class RoundButton(tk.Canvas):
         if self.arrow:
             x, y = w - self.padx - 4, h / 2
             self.create_line(x - 4, y - 2, x, y + 2, x + 4, y - 2, fill=fg, width=2)
+
+
+    def _draw_blocky(self, w, h, fill, fg):
+        p = self.pal
+        if self.kind == "ghost" and not (self._hover or self._down) and not self._disabled:
+            fill = mix(p["button"], p["bg"], 0.45)
+        if self._disabled:
+            fill = mix(fill, p["bg"], 0.35)
+        hi, lo = (mix(fill, "#ffffff", 0.35), mix(fill, "#000000", 0.45))
+        edge = "#ffffff" if (self._focus and not self._disabled) else p["edge"]
+        bevel_rect(self, 0, 0, w, h, fill, hi, lo, edge, inset=self._down or self.kind == "selected", t=2)
+        cx, cy = w / 2 - (7 if self.arrow else 0), h / 2 + (1 if self._down else 0)
+        if not self._disabled:
+            self.create_text(cx + 1, cy + 1, text=self._text, fill=mix(fill, "#000000", 0.7), font=self._font)
+        self.create_text(cx, cy, text=self._text, fill=fg, font=self._font)
+        if self.arrow:
+            x, y = w - self.padx - 4, h / 2
+            self.create_polygon(x - 4, y - 2, x + 4, y - 2, x, y + 3, fill=fg, outline="")
 
 
 class TabPill(tk.Canvas):
@@ -245,6 +285,19 @@ class TabPill(tk.Canvas):
         p = self.pal
         self.delete("all")
         w, h = max(2, self.winfo_width()), max(2, self.winfo_height())
+        if p.get("blocky"):
+            fill = p["select_bg"] if self.active else (p["button_active"] if self._hover else p["button"])
+            if not self.active:
+                fill = mix(fill, p["bg"], 0.35)
+            bevel_rect(self, 0, 0, w, h, fill, mix(fill, "#ffffff", 0.35), mix(fill, "#000000", 0.45), p["edge"],
+                       inset=self.active)
+            fg = p["fg"]
+            self.create_text(14, h / 2, text=self._text, anchor="w", fill=fg, font=self._font)
+            cx = w - self._xw / 2 - 2
+            c = p["error"] if self._hover_x else p["muted"]
+            self.create_line(cx - 3, h / 2 - 3, cx + 3, h / 2 + 3, fill=c, width=2)
+            self.create_line(cx - 3, h / 2 + 3, cx + 3, h / 2 - 3, fill=c, width=2)
+            return
         if self.active:
             round_rect(self, 1, 1, w - 1, h - 1, h / 2, fill=p["bg"], outline=p["border"])
         elif self._hover:
