@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -289,7 +288,8 @@ def settings_path() -> Path:
     return base / "gui.json"
 
 
-PERSISTED = ("source", "mc", "loader", "side", "online", "rules", "last_dir", "theme", "restore_tabs", "show_options", "ui_version")
+PERSISTED = ("source", "mc", "loader", "side", "online", "rules", "last_dir", "restore_tabs", "show_options",
+             "check_updates", "skip_update", "last_update_check")
 
 
 def load_settings(path: Optional[Path] = None) -> dict:
@@ -312,60 +312,16 @@ def save_settings(values: dict, path: Optional[Path] = None) -> None:
 
 # ----------------------------------------------------------------------- themes
 
-THEME_CHOICES = ("Minecraft", "System", "Light", "Dark")
-
-PALETTES = {
-    "light": {
-        "page": "#e7eaf0", "bg": "#ffffff", "surface": "#ffffff", "field": "#f1f3f8", "fg": "#1b1f27",
-        "muted": "#586274", "border": "#e1e5ec", "trough": "#e6e8ec", "button": "#eef1f6", "button_active": "#e0e5ee",
-        "accent": "#2563eb", "accent_active": "#1d4ed8", "accent_fg": "#ffffff",
-        "select_bg": "#dbe7ff", "select_fg": "#10203f",
-        "error": "#c62828", "warning": "#8a5100", "info": "#1565c0",
-        "blocky": False, "hi": "#ffffff", "lo": "#c9cfdb", "edge": "#e1e5ec",
-    },
-    "dark": {
-        "page": "#0f1217", "bg": "#1b1f26", "surface": "#1b1f26", "field": "#252a33", "fg": "#e8eaed",
-        "muted": "#9aa3af", "border": "#2a303a", "trough": "#2e3540", "button": "#262c36", "button_active": "#323946",
-        "accent": "#2f68ee", "accent_active": "#2757d6", "accent_fg": "#ffffff",
-        "select_bg": "#27406f", "select_fg": "#ffffff",
-        "error": "#ff7b7b", "warning": "#f0b429", "info": "#6cb2ff",
-        "blocky": False, "hi": "#2a303a", "lo": "#0f1217", "edge": "#2a303a",
-    },
-    # Original Minecraft-inspired look: dirt background, dark stone panels, grass-green primary buttons.
-    # (No Mojang artwork, fonts or logos are used; "hi"/"lo" are the bevel colours of the blocky widgets.)
-    "minecraft": {
-        "page": "#4a3422", "bg": "#313131", "surface": "#262626", "field": "#1c1c1c", "fg": "#f2f2f2",
-        "muted": "#bdbdbd", "border": "#0b0b0b", "trough": "#1c1c1c", "button": "#6b6b6b", "button_active": "#585b94",
-        "accent": "#3b7d27", "accent_active": "#2f6a1e", "accent_fg": "#ffffff",
-        "select_bg": "#2d5f1e", "select_fg": "#ffffff",
-        "error": "#ff6b6b", "warning": "#ffd24a", "info": "#6ec6ff",
-        "blocky": True, "hi": "#a8a8a8", "lo": "#3c3c3c", "edge": "#0b0b0b",
-    },
+# The one colour scheme: an original Minecraft-inspired look (dirt background, dark stone panels, grass-green primary
+# buttons). No Mojang artwork, fonts or logos are used; "hi"/"lo"/"edge" are the bevel colours of the blocky widgets.
+PALETTE = {
+    "page": "#4a3422", "bg": "#313131", "surface": "#262626", "field": "#1c1c1c", "fg": "#f2f2f2",
+    "muted": "#bdbdbd", "border": "#0b0b0b", "trough": "#1c1c1c", "button": "#6b6b6b", "button_active": "#585b94",
+    "accent": "#3b7d27", "accent_active": "#2f6a1e", "accent_fg": "#ffffff",
+    "select_bg": "#2d5f1e", "select_fg": "#ffffff",
+    "error": "#ff6b6b", "warning": "#ffd24a", "info": "#6ec6ff",
+    "hi": "#a8a8a8", "lo": "#3c3c3c", "edge": "#0b0b0b",
 }
-
-
-def system_prefers_dark() -> bool:
-    """Best-effort check of the operating system's light/dark setting (False when unknown)."""
-    try:
-        if sys.platform == "win32":
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
-                return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
-        if sys.platform == "darwin":
-            r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True, timeout=2)
-            return r.stdout.strip().lower() == "dark"
-        return "dark" in os.environ.get("GTK_THEME", "").lower()
-    except Exception:  # noqa: BLE001 - detection must never break the app
-        return False
-
-
-def resolve_theme(preference: Optional[str], dark_probe=None) -> str:
-    """'System' / 'Light' / 'Dark' / 'Minecraft' (any case, or junk) -> 'light', 'dark' or 'minecraft'."""
-    p = (preference or "system").strip().lower()
-    if p in ("light", "dark", "minecraft"):
-        return p
-    return "dark" if (dark_probe or system_prefers_dark)() else "light"
 
 
 def _luminance(hex_color: str) -> float:

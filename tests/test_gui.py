@@ -445,53 +445,34 @@ class GuiTests(unittest.TestCase):
         dialogs["askokcancel"].assert_not_called()
         self.assertEqual(dialogs["showinfo"].call_args[0][0], "Nothing to auto-fix")
 
-    def test_theme_switching_recolours_everything_and_is_saved(self):
+    def test_minecraft_palette_is_applied_everywhere(self):
         from tkinter import ttk
         self.analyze()
         vm = self.gui.vm
-        for choice, expected in (("Dark", "dark"), ("Light", "light"), ("Dark", "dark")):
-            self.app.theme_var.set(choice)
-            self.app._on_theme_change()
-            self.app.update()
-            pal = vm.PALETTES[expected]
-            self.assertEqual(self.app.pal, pal)
-            self.assertEqual(str(ttk.Style().lookup("Treeview", "background")).lower(), pal["surface"])
-            self.assertEqual(str(self.app.detail.cget("bg")).lower(), pal["surface"])
-            self.assertEqual(str(self.app.pack_text.cget("bg")).lower(), pal["surface"])
-            self.assertEqual(str(self.app.welcome_box.cget("bg")).lower(), pal["surface"])
-            self.assertEqual(str(self.app.gauge.cget("bg")).lower(), pal["bg"])
-            self.assertEqual(str(self.app.cget("background")).lower(), pal["page"])
-            self.assertEqual(str(self.app.tabbar.cget("bg")).lower(), pal["page"])
-            self.assertEqual(str(self.app._cards[0].cget("bg")).lower(), pal["page"])
-            self.assertEqual(self.app.analyze_btn.pal, pal)  # custom-drawn buttons follow the theme too
-            self.assertEqual(str(self.app.count_lbls["error"].cget("fg")).lower(), pal["error"])
-            self.assertEqual(str(self.app.tree.tag_configure("error", "foreground")).lower(), pal["error"])
-            self.assertEqual(vm.load_settings()["theme"], choice)
-        self.assertEqual(self.app.theme_var.get(), "Dark")
+        pal = vm.PALETTE
+        self.assertEqual(self.app.pal, pal)
+        self.assertEqual(str(ttk.Style().lookup("Treeview", "background")).lower(), pal["surface"])
+        self.assertEqual(str(self.app.detail.cget("bg")).lower(), pal["surface"])
+        self.assertEqual(str(self.app.pack_text.cget("bg")).lower(), pal["surface"])
+        self.assertEqual(str(self.app.welcome_box.cget("bg")).lower(), pal["surface"])
+        self.assertEqual(str(self.app.gauge.cget("bg")).lower(), pal["bg"])
+        self.assertEqual(str(self.app.cget("background")).lower(), pal["page"])
+        self.assertEqual(str(self.app.tabbar.cget("bg")).lower(), pal["page"])
+        self.assertEqual(self.app.analyze_btn.pal, pal)
+        self.assertEqual(str(self.app.count_lbls["error"].cget("fg")).lower(), pal["error"])
+        self.assertEqual(str(self.app.tree.tag_configure("error", "foreground")).lower(), pal["error"])
 
-    def test_theme_system_follows_the_os_and_survives_restart(self):
-        vm = self.gui.vm
-        with mock.patch.object(vm, "system_prefers_dark", return_value=True):
-            self.app.theme_var.set("System")
-            self.app._on_theme_change()
-            self.assertEqual(self.app.pal, vm.PALETTES["dark"])
-        with mock.patch.object(vm, "system_prefers_dark", return_value=False):
-            self.app._on_theme_change()
-            self.assertEqual(self.app.pal, vm.PALETTES["light"])
-        self.app.theme_var.set("Dark")
-        self.app._on_theme_change()
-        self.app.destroy()
-        self.app = self.gui.App()  # a new window picks up the saved choice
-        self.assertEqual(self.app.theme_var.get(), "Dark")
-        self.assertEqual(self.app.pal, vm.PALETTES["dark"])
+    def test_there_is_no_theme_choice_any_more(self):
+        self.assertFalse(hasattr(self.app, "theme_var"))
+        self.assertFalse(hasattr(self.gui.vm, "THEME_CHOICES"))
+        self.assertFalse(hasattr(self.gui.vm, "resolve_theme"))
 
-    def test_bad_theme_in_settings_falls_back_to_system(self):
+    def test_old_saved_theme_setting_is_ignored(self):
         vm = self.gui.vm
         self.app.destroy()
-        vm.save_settings({"theme": "Neon", "ui_version": 2})
-        with mock.patch.object(vm, "system_prefers_dark", return_value=False):
-            self.app = self.gui.App()
-        self.assertEqual(self.app.theme_var.get(), "System")
+        vm.save_settings({"theme": "Light", "rules": ""})
+        self.app = self.gui.App()
+        self.assertEqual(self.app.pal, vm.PALETTE)
 
     def test_bad_source_shows_error_not_crash(self):
         self.app.src_var.set(str(Path(self.tmp.name) / "does-not-exist"))

@@ -18,16 +18,26 @@ Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MI
 - **Auto-fix** applies the safe fixes for you. Mods are never deleted (they are renamed to `.jar.disabled`), config files
   are backed up first, and everything can be **undone**.
 - Keeps several packs open in **tabs**, remembers them, and lets you **save packs** for one-click re-opening.
-- A **Minecraft look** by default (blocky bevelled panels, a pixel heart health bar), plus Light, Dark and System themes.
+- A **Minecraft look**: blocky bevelled panels and buttons, a dirt-brown background and a pixel heart health bar.
 
 ---
 
 ## Get it
 
-You need **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/). On Windows tick **"Add python.exe to PATH"**
+The Windows installer below needs nothing else. For the other options you need **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/). On Windows tick **"Add python.exe to PATH"**
 in the Python installer. Nothing else needs installing: the app uses only Python's standard library.
 
-### Easiest: the single file
+### Windows installer (no Python needed)
+
+Download **`ModpackDoctor-Setup.exe`** from the newest release and run it. It lets you choose where to install, can add a
+**Start Menu** and a **Desktop** shortcut, and shows up in *Settings > Apps* so you can uninstall it normally. It needs no
+Python and no admin rights if you install just for yourself. Because the installer is not code-signed, Windows
+SmartScreen may say "unknown publisher": choose **More info > Run anyway**.
+
+Want to build it yourself? On Windows, with Python and [Inno Setup 6](https://jrsoftware.org/isinfo.php) installed, run
+`pip install pyinstaller` and then `python tools/build_windows.py` from the repository folder. The installer appears in `dist`.
+
+### Easiest with Python: the single file
 
 1. Open the **Releases** page of this repository (right-hand column) and download **`ModpackDoctor.pyzw`** from the newest release.
 2. **Windows:** double-click it. **Any system:** run `python ModpackDoctor.pyzw`.
@@ -128,6 +138,25 @@ brings it back) or **Disable this jar** when nothing in it could be read. Errors
 
 Packs from files are unpacked into `~/ModpackDoctor/workspaces/`. Your original file is never changed.
 
+### Updates
+
+A few seconds after start-up the app looks at the **GitHub Releases** page for a newer version (at most a few times a day,
+and quietly: no network is needed for anything else). If there is one it shows what's new and asks once:
+
+- **Yes** downloads the update, checks it, installs it and restarts the app. With the Windows installer it runs the new
+  installer silently; with the single `ModpackDoctor.pyzw` it swaps that file for the new one.
+- **No** asks again later. **Cancel** skips that version.
+
+Updates are only ever fetched from this project's own GitHub releases. The download is checked against the SHA-256 that GitHub
+publishes for the file, and a `.pyzw` must really be Modpack Doctor and contain exactly the version the release names.
+**Help > Check for updates...** checks right now, and **View > Check for updates on startup** turns the automatic check off.
+A copy run from the source folder cannot replace itself; it opens the release page instead.
+
+**For the maintainer:** `REPO` at the top of `modpack_doctor/updater.py` holds this repository's `owner/name`
+(`MODPACK_DOCTOR_REPO` overrides it, for testing a fork). For each release, bump `__version__` in `modpack_doctor/__init__.py` and `pyproject.toml`,
+and give the release a tag that ends in the same number (`Release-4.1` or `v4.1` for `4.1`). Attach `ModpackDoctor.pyzw` and
+`ModpackDoctor-Setup.exe` (the release workflow does this). With `REPO` empty, update checks are switched off.
+
 ### Tabs and saved packs
 
 - Every pack opens in its own **tab** with its own results and undo history. **Ctrl+T** new tab, **Ctrl+W** close,
@@ -140,8 +169,7 @@ Packs from files are unpacked into `~/ModpackDoctor/workspaces/`. Your original 
 ### Options
 
 Leave **Minecraft**, **Loader** and **Pack is for** on *auto* unless the result looks wrong. Tick **Check Modrinth for updates**
-to also look for newer builds and replacements online. Choose **Minecraft / System / Light / Dark** with the
-*Theme* box. The **Options** button next to *Auto-fix pack* slides these settings rows up out of the way (or back down) to give the findings more room.
+to also look for newer builds and replacements online. The **Options** button next to *Auto-fix pack* slides these settings rows up out of the way (or back down) to give the findings more room.
 
 ### Handy extras
 

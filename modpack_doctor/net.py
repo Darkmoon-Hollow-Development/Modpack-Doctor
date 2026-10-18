@@ -89,6 +89,7 @@ def http_json(url: str, method: str = "GET", body=None, headers: Optional[dict] 
 
 
 def download(url: str, dest: Path, *, sha1: Optional[str] = None, sha512: Optional[str] = None,
+             sha256: Optional[str] = None,
              allowed_hosts=MODRINTH_HOSTS, max_bytes: int = DEFAULT_MAX_DOWNLOAD,
              headers: Optional[dict] = None) -> None:
     """Download to ``dest`` (written atomically). Raises NetError on any problem, including hash mismatch."""
@@ -96,7 +97,7 @@ def download(url: str, dest: Path, *, sha1: Optional[str] = None, sha512: Option
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    h1, h512 = hashlib.sha1(), hashlib.sha512()
+    h1, h512, h256 = hashlib.sha1(), hashlib.sha512(), hashlib.sha256()
     total = 0
     try:
         with _opener(allowed_hosts).open(req, timeout=TIMEOUT) as r, open(tmp, "wb") as out:
@@ -112,11 +113,14 @@ def download(url: str, dest: Path, *, sha1: Optional[str] = None, sha512: Option
                     raise NetError("File is larger than the allowed maximum")
                 h1.update(chunk)
                 h512.update(chunk)
+                h256.update(chunk)
                 out.write(chunk)
         if sha1 and h1.hexdigest().lower() != sha1.lower():
             raise NetError("SHA-1 mismatch: the downloaded file does not match the expected hash")
         if sha512 and h512.hexdigest().lower() != sha512.lower():
             raise NetError("SHA-512 mismatch: the downloaded file does not match the expected hash")
+        if sha256 and h256.hexdigest().lower() != sha256.lower():
+            raise NetError("SHA-256 mismatch: the downloaded file does not match the expected hash")
         os.replace(tmp, dest)
     except NetError:
         raise

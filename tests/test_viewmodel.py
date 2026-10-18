@@ -79,36 +79,31 @@ class SummaryTests(unittest.TestCase):
 
 
 class ThemeTests(unittest.TestCase):
-    def test_resolve(self):
-        self.assertEqual(vm.resolve_theme("Light", lambda: True), "light")
-        self.assertEqual(vm.resolve_theme("DARK", lambda: False), "dark")
-        self.assertEqual(vm.resolve_theme("System", lambda: True), "dark")
-        self.assertEqual(vm.resolve_theme("system", lambda: False), "light")
-        self.assertEqual(vm.resolve_theme(None, lambda: True), "dark")
-        self.assertEqual(vm.resolve_theme("nonsense", lambda: False), "light")
+    def test_palette_is_complete_and_readable(self):
+        pal = vm.PALETTE
+        for key in ("fg", "muted", "error", "warning", "info"):
+            for bg in ("bg", "surface"):
+                self.assertGreaterEqual(vm.contrast_ratio(pal[key], pal[bg]), 4.5, (key, bg))
+        for fg, bg in (("accent_fg", "accent"), ("accent_fg", "accent_active"), ("select_fg", "select_bg"),
+                       ("fg", "button"), ("fg", "field"), ("fg", "button_active")):
+            self.assertGreaterEqual(vm.contrast_ratio(pal[fg], pal[bg]), 4.5, (fg, bg))
+        for k in ("hi", "lo", "edge"):
+            self.assertRegex(pal[k], r"^#[0-9a-f]{6}$")
+        self.assertNotEqual(pal["hi"], pal["lo"])  # the bevel needs a light and a dark side
 
-    def test_system_probe_never_raises(self):
-        self.assertIsInstance(vm.system_prefers_dark(), bool)
-
-    def test_palettes_are_complete_and_readable(self):
-        self.assertEqual(set(vm.PALETTES["light"]), set(vm.PALETTES["dark"]))
-        for name, pal in vm.PALETTES.items():
-            for key in ("fg", "muted", "error", "warning", "info"):
-                for bg in ("bg", "surface"):
-                    self.assertGreaterEqual(vm.contrast_ratio(pal[key], pal[bg]), 4.5, (name, key, bg))
-            for fg, bg in (("accent_fg", "accent"), ("accent_fg", "accent_active"), ("select_fg", "select_bg"),
-                           ("fg", "button"), ("fg", "field"), ("fg", "button_active")):
-                self.assertGreaterEqual(vm.contrast_ratio(pal[fg], pal[bg]), 4.5, (name, fg, bg))
+    def test_only_one_theme_remains(self):
+        for gone in ("PALETTES", "THEME_CHOICES", "resolve_theme", "system_prefers_dark"):
+            self.assertFalse(hasattr(vm, gone), gone)
 
     def test_contrast_ratio_known_values(self):
         self.assertAlmostEqual(vm.contrast_ratio("#000000", "#ffffff"), 21.0, places=1)
         self.assertAlmostEqual(vm.contrast_ratio("#ffffff", "#ffffff"), 1.0, places=2)
 
-    def test_theme_setting_is_persisted(self):
+    def test_settings_are_persisted_and_old_theme_key_is_dropped(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "gui.json"
-            vm.save_settings({"theme": "Dark"}, p)
-            self.assertEqual(vm.load_settings(p)["theme"], "Dark")
+            vm.save_settings({"theme": "Dark", "show_options": False}, p)
+            self.assertEqual(vm.load_settings(p), {"show_options": False})
 
 
 class TabPersistenceTests(unittest.TestCase):

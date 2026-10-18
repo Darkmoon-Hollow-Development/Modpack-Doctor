@@ -16,22 +16,6 @@ from modpack_doctor.sources import Options  # noqa: E402
 from test_gui import HAVE_DISPLAY  # noqa: E402
 
 
-class ThemeTests(unittest.TestCase):
-    def test_minecraft_theme_is_selectable_and_blocky(self):
-        self.assertIn("Minecraft", vm.THEME_CHOICES)
-        self.assertEqual(vm.resolve_theme("minecraft"), "minecraft")
-        self.assertEqual(vm.resolve_theme("MINECRAFT"), "minecraft")
-        self.assertTrue(vm.PALETTES["minecraft"]["blocky"])
-        self.assertFalse(vm.PALETTES["light"]["blocky"])
-        for pal in vm.PALETTES.values():
-            for k in ("hi", "lo", "edge"):
-                self.assertRegex(pal[k], r"^#[0-9a-f]{6}$")
-
-    def test_bevel_colours_are_distinct(self):
-        pal = vm.PALETTES["minecraft"]
-        self.assertNotEqual(pal["hi"], pal["lo"])
-
-
 class SummaryAndBackupTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -100,17 +84,10 @@ class UpdateGuiTests(unittest.TestCase):
         self.app.update()
         self.assertIsNotNone(self.app.result)
 
-    def test_minecraft_is_the_default_theme_and_draws_hearts(self):
-        self.assertEqual(self.app.theme_var.get(), "Minecraft")
-        self.assertTrue(self.app.pal["blocky"])
+    def test_minecraft_look_draws_hearts(self):
+        self.assertEqual(self.app.pal, self.gui.vm.PALETTE)
         self.analyze()
         self.assertGreaterEqual(len(self.app.gauge.find_all()), 100)  # pixel hearts are many small rectangles
-        for choice in ("Light", "Dark", "Minecraft"):  # switching back and forth keeps working
-            self.app.theme_var.set(choice)
-            self.app._on_theme_change()
-            self.app.update()
-            self.assertEqual(self.app.analyze_btn.pal, self.app.pal)
-        self.assertEqual(self.app.theme_var.get(), "Minecraft")
 
     def test_health_hearts_follow_the_score(self):
         self.analyze()
@@ -201,24 +178,3 @@ class UpdateGuiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-@unittest.skipUnless(HAVE_DISPLAY, "tkinter and a display are required")
-class ThemeMigrationTests(unittest.TestCase):
-    def test_old_saved_theme_is_replaced_once(self):
-        with tempfile.TemporaryDirectory() as d:
-            os.environ["MODPACK_DOCTOR_HOME"] = d
-            vm.save_settings({"theme": "Light"})  # what an older version wrote
-            from modpack_doctor import gui
-            app = gui.App(restore=False)
-            try:
-                self.assertEqual(app.theme_var.get(), "Minecraft")
-                app.theme_var.set("Dark")
-                app._on_theme_change()
-            finally:
-                app.destroy()
-            app = gui.App(restore=False)  # the user's later choice is respected
-            try:
-                self.assertEqual(app.theme_var.get(), "Dark")
-            finally:
-                app.destroy()

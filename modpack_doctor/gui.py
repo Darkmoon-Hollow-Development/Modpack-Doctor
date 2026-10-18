@@ -10,6 +10,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Callable, Optional
 import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 
-from . import __version__, crashlog, fixer, launchers, net, pipeline, viewmodel as vm
+from . import __version__, crashlog, fixer, launchers, net, pipeline, updater, viewmodel as vm
 from .models import LOADERS, Action, Fix
 from .rules import load_rules
 from .sources import Options, SourceError
@@ -114,9 +115,10 @@ class Tab:
 
 
 class App(tk.Tk):
-    def __init__(self, initial=None, *, restore: bool = True, autoscan: bool = False):
+    def __init__(self, initial=None, *, restore: bool = True, autoscan: bool = False, check_updates: bool = False):
         """``initial``: a path or a list of paths to open as tabs. ``restore``: bring back the tabs from last time.
-        ``autoscan``: analyse the active tab at start-up if it is a local folder (cheap, no network)."""
+        ``autoscan``: analyse the active tab at start-up if it is a local folder (cheap, no network).
+        ``check_updates``: look for a newer release on GitHub shortly after start-up (if the user has not turned it off)."""
         super().__init__()
         self.title("Modpack Doctor")
         self.geometry("1240x840")
@@ -148,6 +150,9 @@ class App(tk.Tk):
         self.launcher_var = tk.StringVar(value=launchers.label(launchers.AUTO))
         self.online_var = tk.BooleanVar(value=False)
         self.restore_var = tk.BooleanVar(value=bool(self.settings.get("restore_tabs", True)))
+        self.updates_var = tk.BooleanVar(value=bool(self.settings.get("check_updates", True)))
+        self._upd_queue: queue.Queue = queue.Queue()
+        self._upd_busy = False
         self.cf_var = tk.StringVar(value=os.environ.get("CURSEFORGE_API_KEY", ""))
         self.rules_var = tk.StringVar(value=self.settings.get("rules", ""))
         self.sev_vars = {s: tk.BooleanVar(value=True) for s in ("error", "warning", "info")}
@@ -156,12 +161,7 @@ class App(tk.Tk):
         self.mod_search_var = tk.StringVar()
         self.mod_issue_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Ready. Choose a modpack to analyse.")
-        theme = self.settings.get("theme", "Minecraft")
-        if self.settings.get("ui_version") != 2:  # first run of the Minecraft redesign: older saved themes must not hide it
-            theme = "Minecraft"
-            self.settings["ui_version"] = 2
-        self.theme_var = tk.StringVar(value=theme if theme in vm.THEME_CHOICES else "System")
-        self.pal = vm.PALETTES[vm.resolve_theme(self.theme_var.get())]
+        self.pal = vm.PALETTE
         self.bg = self.pal["bg"]
         self.options_var = tk.BooleanVar(value=bool(self.settings.get("show_options", True)))
         self._score_shown: Optional[int] = None
@@ -185,6 +185,8 @@ class App(tk.Tk):
         self._refresh_buttons()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_id = self.after(80, self._poll)
+        if check_updates and self.updates_var.get() and updater.configured():
+            self.after(2500, self._auto_update_check)
 
     # The pack-specific state lives on the active tab; these keep older call sites simple.
     @property
@@ -240,7 +242,6 @@ class App(tk.Tk):
         self.f_small = base.copy()
         self.f_small.configure(size=max(8, base.cget("size") - 1))
         self.f_mono = tkfont.nametofont("TkFixedFont").copy()
-        self._ui_family = base.cget("family")
         have = {f.lower(): f for f in tkfont.families(self)}
         self._block_family = next((have[n.lower()] for n in ("Cascadia Mono", "Consolas", "Lucida Console",
                                                               "DejaVu Sans Mono", "Liberation Mono", "Courier New")
@@ -261,9 +262,9 @@ class App(tk.Tk):
         st.configure("Count.TLabel", font=self.f_bold)
         st.configure("Section.TLabel", font=self.f_small)
 
-    def _apply_fonts(self, blocky: bool) -> None:
-        """The Minecraft theme uses a chunky monospaced face; the other themes use the platform's UI font."""
-        fam = self._block_family if blocky else self._ui_family
+    def _apply_fonts(self) -> None:
+        """The Minecraft look uses a chunky monospaced face (the first of a few common ones that is installed)."""
+        fam = self._block_family
         for f in (tkfont.nametofont(n) for n in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont")):
             f.configure(family=fam)
         for f in (self.f_bold, self.f_h1, self.f_big, self.f_small):
@@ -271,10 +272,10 @@ class App(tk.Tk):
         ttk.Style(self).configure("Treeview", rowheight=self.f_base.metrics("linespace") + 11)
 
     def _apply_theme(self) -> None:
-        """(Re)colour every widget from the palette chosen in the Theme selector."""
-        p = self.pal = vm.PALETTES[vm.resolve_theme(self.theme_var.get())]
+        """Colour every widget from the Minecraft palette."""
+        p = self.pal = vm.PALETTE
         self.bg = p["bg"]
-        self._apply_fonts(bool(p.get("blocky")))
+        self._apply_fonts()
         st = ttk.Style(self)
         self.configure(background=p["page"])
         st.configure(".", background=p["bg"], foreground=p["fg"], bordercolor=p["border"], lightcolor=p["bg"],
@@ -376,11 +377,6 @@ class App(tk.Tk):
         except tk.TclError:
             pass
 
-    def _on_theme_change(self) -> None:
-        self._apply_theme()
-        self._save_settings()
-        self.status_var.set(f"Theme: {self.theme_var.get()}")
-
     def _set_icon(self) -> None:
         """Window, taskbar and Alt-Tab icon. Purely cosmetic, so any failure is ignored."""
         try:
@@ -434,21 +430,19 @@ class App(tk.Tk):
         tm.configure(postcommand=lambda: self._fill_tabs_menu(tm))
         m.add_cascade(label="Tabs", menu=tm)
         v = tk.Menu(m, tearoff=False)
-        th = tk.Menu(v, tearoff=False)
-        for choice in vm.THEME_CHOICES:
-            th.add_radiobutton(label=choice, variable=self.theme_var, value=choice, command=self._on_theme_change)
-        v.add_cascade(label="Theme", menu=th)
         v.add_checkbutton(label="Reopen my tabs on startup", variable=self.restore_var, command=self._on_restore_toggle)
+        v.add_checkbutton(label="Check for updates on startup", variable=self.updates_var, command=self._save_settings)
         m.add_cascade(label="View", menu=v)
         h = tk.Menu(m, tearoff=False)
         h.add_command(label="Keyboard shortcuts", command=self.show_shortcuts)
         h.add_separator()
+        h.add_command(label="Check for updates...", command=lambda: self._start_update_check(manual=True))
         h.add_command(label="About", command=self.about)
         m.add_cascade(label="Help", menu=h)
         self.config(menu=m)
         self.menu_tools = t
         self.menu_file = f
-        self._menus = [m, f, t, tm, v, th, h] + self._menus  # + the Saved packs menu made above
+        self._menus = [m, f, t, tm, v, h] + self._menus  # + the Saved packs menu made above
 
     def _btn(self, parent, text, command, kind="default", **kw) -> RoundButton:
         b = RoundButton(parent, self.pal, text, command, kind=kind, font=self.f_bold if kind == "accent" else self.f_base,
@@ -524,11 +518,6 @@ class App(tk.Tk):
         ttk.Label(r1, text="Extra rules file").pack(side="left")
         ttk.Entry(r1, textvariable=self.rules_var).pack(side="left", fill="x", expand=True, padx=(6, 8))
         self._btn(r1, "Browse...", self.pick_rules, pady=5).pack(side="left")
-        ttk.Label(r1, text="Theme").pack(side="left", padx=(14, 6))
-        theme_cb = ttk.Combobox(r1, textvariable=self.theme_var, values=vm.THEME_CHOICES, width=14, state="readonly")
-        theme_cb.pack(side="left")
-        theme_cb.bind("<<ComboboxSelected>>", lambda e: self._on_theme_change())
-        self._combos.append(theme_cb)
 
     def _toggle_options(self) -> None:
         """Slide the pack-settings rows up out of view (or back down); the choice is remembered."""
@@ -633,20 +622,7 @@ class App(tk.Tk):
         c = self.gauge
         c.delete("all")
         self._score_shown = score
-        if self.pal.get("blocky"):
-            self._draw_hearts(score)
-            return
-        a, b = 14 + 55, 136 + 55
-        cx = 130
-        c.create_oval(a, 14, b, 136, outline=self.pal["trough"], width=12)
-        if score is None:
-            c.create_text(cx, 75, text="--", font=self.f_big, fill=self.pal["muted"])
-            return
-        color = vm.score_color(score)
-        if score > 0:
-            c.create_arc(a, 14, b, 136, start=90, extent=-359.9 * score / 100, style="arc", outline=color, width=12)
-        c.create_text(cx, 66, text=str(score), font=self.f_big, fill=color)
-        c.create_text(cx, 100, text="health score", fill=self.pal["muted"])
+        self._draw_hearts(score)
 
     HEART = ("..XX...XX..", ".XXXX.XXXX.", "XXXXXXXXXXX", "XXXXXXXXXXX", ".XXXXXXXXX.", "..XXXXXXX..", "...XXXXX...",
              "....XXX....", ".....X.....")
@@ -1440,6 +1416,7 @@ class App(tk.Tk):
         threading.Thread(target=run, daemon=True).start()
 
     def _poll(self) -> None:
+        self._poll_updates()
         try:
             while True:
                 item = self._queue.get_nowait()
@@ -1487,9 +1464,9 @@ class App(tk.Tk):
     def _save_settings(self) -> None:
         for old in ("source", "mc", "loader", "side", "online"):  # per-tab now (older versions stored them here)
             self.settings.pop(old, None)
-        self.settings.update(rules=self.rules_var.get().strip(), theme=self.theme_var.get(),
-                             restore_tabs=bool(self.restore_var.get()),
-                             show_options=bool(self.options_var.get()), ui_version=2)
+        self.settings.update(rules=self.rules_var.get().strip(), restore_tabs=bool(self.restore_var.get()),
+                             check_updates=bool(self.updates_var.get()),
+                             show_options=bool(self.options_var.get()))
         vm.save_settings(self.settings)
 
     def analyze(self, then_autofix: bool = False) -> None:
@@ -2347,6 +2324,116 @@ class App(tk.Tk):
         ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 12))
         win.shortcuts_text = txt  # type: ignore[attr-defined]
 
+    # ------------------------------------------------------------------ updates from GitHub
+    def _auto_update_check(self) -> None:
+        last = float(self.settings.get("last_update_check") or 0)
+        if time.time() - last < 6 * 3600:  # at most a few times a day
+            return
+        self._start_update_check(manual=False)
+
+    def _start_update_check(self, manual: bool = False) -> None:
+        if self._upd_busy:
+            return
+        if not updater.configured():
+            if manual:
+                messagebox.showinfo("Modpack Doctor", "Updates are not set up in this build (no GitHub repository is "
+                                    "configured).")
+            return
+        self._upd_busy = True
+        if manual:
+            self.status_var.set("Checking for updates...")
+
+        def work() -> None:
+            try:
+                self._upd_queue.put(("check", manual, updater.check(), None))
+            except updater.UpdateError as e:
+                self._upd_queue.put(("check", manual, None, str(e)))
+            except Exception as e:  # noqa: BLE001 - an update check must never break the app
+                self._upd_queue.put(("check", manual, None, f"{type(e).__name__}: {e}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _poll_updates(self) -> None:
+        try:
+            item = self._upd_queue.get_nowait()
+        except queue.Empty:
+            return
+        if item[0] == "check":
+            _, manual, rel, err = item
+            self._upd_busy = False
+            if err:
+                if manual:
+                    self.status_var.set("Could not check for updates.")
+                    messagebox.showerror("Modpack Doctor", f"Could not check for updates:\n{err}")
+                return
+            self.settings["last_update_check"] = time.time()
+            self._save_settings()
+            if rel is None:
+                if manual:
+                    self.status_var.set("Modpack Doctor is up to date.")
+                    messagebox.showinfo("Modpack Doctor", f"You have the newest version ({__version__}).")
+                return
+            if not manual and self.settings.get("skip_update") == rel.version:
+                return
+            self._offer_update(rel)
+        elif item[0] == "downloaded":
+            _, rel, kind, path, err = item
+            self.progress.stop()
+            self.progress.configure(mode="determinate", value=0)
+            if err:
+                self.status_var.set("The update could not be installed.")
+                if messagebox.askyesno("Modpack Doctor", f"The update could not be downloaded or verified:\n{err}\n\n"
+                                       "Open the release page to download it by hand?"):
+                    self.open_link(rel.page_url)
+                return
+            self._install_update(kind, path)
+
+    def _offer_update(self, rel) -> None:
+        kind = updater.install_kind()
+        notes = rel.notes.strip()
+        notes = (notes[:700] + "...") if len(notes) > 700 else notes
+        head = f"Modpack Doctor {rel.version} is available (you have {__version__})."
+        if kind == "source" or updater.asset_for(kind, rel) is None:
+            if messagebox.askyesno("Update available", f"{head}\n\n{notes}\n\nOpen the release page to download it?"):
+                self.open_link(rel.page_url)
+            return
+        answer = messagebox.askyesnocancel(
+            "Update available",
+            f"{head}\n\n{notes}\n\nUpdate now? The app downloads it, installs it and restarts.\n\n"
+            "Yes = update now     No = remind me later     Cancel = skip this version")
+        if answer is None:
+            self.settings["skip_update"] = rel.version
+            self._save_settings()
+        elif answer:
+            self.download_update(rel, kind)
+
+    def download_update(self, rel, kind: str) -> None:
+        self.status_var.set(f"Downloading Modpack Doctor {rel.version}...")
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(12)
+
+        def work() -> None:
+            try:
+                path = updater.download_update(rel, kind, updater.update_dir())
+                self._upd_queue.put(("downloaded", rel, kind, path, None))
+            except updater.UpdateError as e:
+                self._upd_queue.put(("downloaded", rel, kind, None, str(e)))
+            except Exception as e:  # noqa: BLE001
+                self._upd_queue.put(("downloaded", rel, kind, None, f"{type(e).__name__}: {e}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _install_update(self, kind: str, path) -> None:
+        if self.busy:
+            messagebox.showinfo("Modpack Doctor", "The update is downloaded. Finish the running task first, then choose "
+                                "Help > Check for updates.")
+            return
+        try:
+            updater.apply_update(kind, path)
+        except (updater.UpdateError, OSError) as e:
+            messagebox.showerror("Modpack Doctor", f"Could not start the update:\n{e}")
+            return
+        self.status_var.set("Updating... the app restarts in a moment.")
+        self._on_close()
+
     def about(self) -> None:
         messagebox.showinfo("About Modpack Doctor", f"Modpack Doctor {__version__}\n\nChecks Minecraft modpacks for mod "
                             "incompatibilities, missing dependencies, config problems and performance gaps.\n\n"
@@ -2363,7 +2450,7 @@ def main(initial=None) -> int:
     """Open the app. ``initial`` may be one path or a list of paths (each becomes a tab)."""
     _enable_hidpi()
     try:
-        app = App(initial, autoscan=True)
+        app = App(initial, autoscan=True, check_updates=True)
     except tk.TclError as e:
         print(f"Could not open a window ({e}). Use the command-line version instead: "
               "python -m modpack_doctor analyze <folder-or-pack>", file=sys.stderr)
