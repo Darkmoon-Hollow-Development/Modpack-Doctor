@@ -47,8 +47,11 @@ On Debian/Ubuntu Linux install the window toolkit once first: `sudo apt install 
 
 ### From the source code
 
-1. On this page click the green **Code** button, then **Download ZIP**, and unzip it anywhere.
-   (Or, if you use Git: `git clone <repository address>`.)
+The source code lives in the [Modpack-Doctor-Files](https://github.com/Darkmoon-Hollow-Development/Modpack-Doctor-Files)
+repository; this page holds the downloads and the readme.
+
+1. On the source repository click the green **Code** button, then **Download ZIP**, and unzip it anywhere.
+   (Or, if you use Git: `git clone https://github.com/Darkmoon-Hollow-Development/Modpack-Doctor-Files.git`.)
 2. Start the app:
    - **Windows:** double-click **`ModpackDoctor.pyw`**.
    - **Any system**, from a terminal opened inside the unzipped folder: `python -m modpack_doctor`
@@ -152,10 +155,11 @@ publishes for the file, and a `.pyzw` must really be Modpack Doctor and contain 
 **Help > Check for updates...** checks right now, and **View > Check for updates on startup** turns the automatic check off.
 A copy run from the source folder cannot replace itself; it opens the release page instead.
 
-**For the maintainer:** `REPO` at the top of `modpack_doctor/updater.py` holds this repository's `owner/name`
-(`MODPACK_DOCTOR_REPO` overrides it, for testing a fork). For each release, bump `__version__` in `modpack_doctor/__init__.py` and `pyproject.toml`,
-and give the release a tag that ends in the same number (`Release-4.1` or `v4.1` for `4.1`). Attach `ModpackDoctor.pyzw` and
-`ModpackDoctor-Setup.exe` (the release workflow does this). With `REPO` empty, update checks are switched off.
+**For the maintainer:** `REPO` at the top of `modpack_doctor/updater.py` is the public downloads repository
+(`Darkmoon-Hollow-Development/Modpack-Doctor`), not the source repository; `MODPACK_DOCTOR_REPO` overrides it for testing.
+Releases there must carry `ModpackDoctor.pyzw` and `ModpackDoctor-Setup.exe`, and a tag that ends in the same number as
+`__version__` (`Release-5.1` for `5.1`). The release workflow in the source repository does all of this (see *For developers*).
+With `REPO` empty, update checks are switched off. **Help > Open downloads page** opens the releases list.
 
 ### Tabs and saved packs
 
@@ -177,6 +181,9 @@ to also look for newer builds and replacements online. The **Options** button ne
   score and the worst problems. Good for Discord and forum help requests.
 - **Mods tab:** select a mod and click **Find online** to search for it on your launcher's site, or **Copy list** to put the
   whole mod list on the clipboard.
+- **If something goes wrong,** the app now shows a message and saves the details to `~/.modpack_doctor/error.log` instead
+  of failing silently. **Help > Open error log** opens it; attach it when you report a bug.
+- The window opens with the same size and position as last time (and is moved back on screen if your monitor setup changed).
 - **Tools > Back up configs and mod list** zips the `config`, `defaultconfigs`, `kubejs`, `scripts` and `shaderpacks` folders,
   `options.txt` and a text list of the mods into `.modpack_doctor/backups/` (the mod jars themselves are not copied).
 
@@ -228,10 +235,22 @@ command line). Its lists are added to the built-in ones. Pull requests that exte
 
 **Build the single file yourself:** `python tools/build_single_file.py` writes `dist/ModpackDoctor.pyzw` (a standard-library zipapp).
 
-**Publish a release:** bump the version in `modpack_doctor/__init__.py` and `pyproject.toml`, commit, then push a tag:
-`git tag v0.1.0` and `git push origin v0.1.0`. The *Release* workflow runs the tests, builds `ModpackDoctor.pyzw` and
-attaches it to a new GitHub Release (GitHub adds the source ZIP automatically). You can also create the release by hand on the
-Releases page and drag the built file in.
+**Two repositories.** The source lives in `Modpack-Doctor-Files`. The public `Modpack-Doctor` repository holds only the readme
+and the **Releases** (the app checks it for updates). The *Release* workflow in the source repository builds the app and
+publishes the release to the public one.
+
+**One-time setup:** create a fine-grained personal access token with **Contents: Read and write** on the public
+`Modpack-Doctor` repository (GitHub > Settings > Developer settings > Personal access tokens), and save it in the source
+repository under *Settings > Secrets and variables > Actions* as **`RELEASES_TOKEN`**. (The built-in token cannot write to a
+second repository.) The public repository needs at least one commit, which the readme provides.
+
+**Publish a release:** bump the version in `modpack_doctor/__init__.py` and `pyproject.toml`, commit, then push a tag
+that ends in the same number, from the source repository: `git tag Release-5.1` and `git push origin Release-5.1`.
+The workflow runs the tests, builds `ModpackDoctor.pyzw` and `ModpackDoctor-Setup.exe`, and attaches them to a new release in
+the public repository. Put your release notes in a `RELEASE_NOTES.md` in the source repository before tagging (or edit the
+release text afterwards). You can also upload the two files to the public Releases page by hand.
+
+**Tests:** a second workflow runs the test suite on every push, on Linux and Windows.
 
 ```
 python -m unittest discover -s tests            # engine tests; GUI tests are skipped without tkinter and a display
