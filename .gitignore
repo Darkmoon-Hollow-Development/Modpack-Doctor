@@ -1,7 +1,0 @@
-
-*.egg-info/
-*.pyc
-.modpack_doctor/
-__pycache__/
-build/
-dist/
