@@ -4,7 +4,7 @@
 > (not on GitHub). Include the exported report (**Export report...**) and your Minecraft version and loader.
 
 Scan a Minecraft modpack and find out what is wrong with it, why, and how to fix it, in one click.
-Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MIT).
+Works with **Forge, NeoForge, Fabric and Quilt** packs. Free to use.
 
 ![Modpack Doctor](screenshot.png)
 
@@ -22,46 +22,19 @@ Works with **Forge, NeoForge, Fabric and Quilt** packs. Free and open source (MI
 
 ---
 
-## Get it
+## Download
 
-The Windows installer below needs nothing else. For the other options you need **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/). On Windows tick **"Add python.exe to PATH"**
-in the Python installer. Nothing else needs installing: the app uses only Python's standard library.
+1. Open the **[Releases page](https://github.com/Darkmoon-Hollow-Development/Modpack-Doctor/releases)** and download
+   **`ModpackDoctor-Setup.exe`** from the newest release.
+2. Run it. It lets you choose where to install, can add a **Start Menu** and a **Desktop** shortcut, and shows up in
+   *Settings > Apps* so you can uninstall it normally. It needs no Python and no admin rights if you install just for yourself.
 
-### Windows installer (no Python needed)
+Because the installer is not code-signed, Windows SmartScreen may say "unknown publisher": choose **More info > Run anyway**.
 
-Download **`ModpackDoctor-Setup.exe`** from the newest release and run it. It lets you choose where to install, can add a
-**Start Menu** and a **Desktop** shortcut, and shows up in *Settings > Apps* so you can uninstall it normally. It needs no
-Python and no admin rights if you install just for yourself. Because the installer is not code-signed, Windows
-SmartScreen may say "unknown publisher": choose **More info > Run anyway**.
+Once installed, the app checks for new versions by itself and updates with one click (see *Updates* below).
 
-Want to build it yourself? On Windows, with Python and [Inno Setup 6](https://jrsoftware.org/isinfo.php) installed, run
-`pip install pyinstaller` and then `python tools/build_windows.py` from the repository folder. The installer appears in `dist`.
-
-### Easiest with Python: the single file
-
-1. Open the **Releases** page of this repository (right-hand column) and download **`ModpackDoctor.pyzw`** from the newest release.
-2. **Windows:** double-click it. **Any system:** run `python ModpackDoctor.pyzw`.
-
-That one file is the whole app. Keep it anywhere; delete it to remove the app (settings live in `~/.modpack_doctor`).
-On Debian/Ubuntu Linux install the window toolkit once first: `sudo apt install python3-tk`.
-
-### From the source code
-
-The source code lives in the [Modpack-Doctor-Files](https://github.com/Darkmoon-Hollow-Development/Modpack-Doctor-Files)
-repository; this page holds the downloads and the readme.
-
-1. On the source repository click the green **Code** button, then **Download ZIP**, and unzip it anywhere.
-   (Or, if you use Git: `git clone https://github.com/Darkmoon-Hollow-Development/Modpack-Doctor-Files.git`.)
-2. Start the app:
-   - **Windows:** double-click **`ModpackDoctor.pyw`**.
-   - **Any system**, from a terminal opened inside the unzipped folder: `python -m modpack_doctor`
-
-Prefer a command? From the unzipped folder, `pip install .` adds a `modpack-doctor` command:
-
-```
-modpack-doctor            # opens the app
-modpack-doctor analyze "C:\path\to\instance"
-```
+**Prefer no installer?** Download **`ModpackDoctor.pyzw`** instead. It is a single file that needs
+[Python 3.11 or newer](https://www.python.org/downloads/) (tick "Add python.exe to PATH" when installing). Double-click it to start.
 
 ---
 
@@ -83,6 +56,26 @@ or wrong-version dependencies, a Mixin that failed, out-of-memory, or a Java ver
 jar get a **Disable** button. Use **Open a crash file...** to read any report you have saved, or **Paste text or link...** to analyze a crash that
 a player sent you: paste the report or log text, or an `mclo.gs` link (only `api.mclo.gs` is contacted, and only then). It understands the common
 Forge, NeoForge, Fabric and Quilt formats; treat the result as a strong hint, not proof.
+
+### Running a server
+
+Open the server's own folder (the one with `server.properties`, `logs` and `mods`) and use the **Server** tab. It has three parts:
+
+- **Files** lists the usual server files (settings, EULA, ops, whitelist, bans, world, icon, mods, configs, start scripts) with a
+  note on anything wrong: an EULA that is not `true`, an empty whitelist while the whitelist is on, a server icon that is not
+  64x64, crash reports waiting. Double-click a file to open it. **Edit server.properties...** lets you change settings in a
+  list, warns about risky ones (online-mode off, a very large view-distance, RCON with no password) and keeps a `.bak` copy.
+- **Logs** reads `logs/latest.log` (or any `.log` / `.log.gz` you pick) and says whether the server started and how long it took,
+  how often it fell behind, who joined, the most common errors, and the usual start-up failures: EULA not accepted, port already
+  in use, the watchdog stopping a stuck tick, missing dependencies, a client-only mod on the server. Mods it can match to a jar get a
+  **Disable** button.
+- **MOTD** is a maker for the two lines players see in the server list. Type `&` colour codes or click the colours and
+  Bold / Italic / Underline / Strike / Magic buttons, try the presets, centre a line, or give a line a gradient (Minecraft 1.16+).
+  The preview shows how it will look and how wide each line is. **Save to server.properties** writes it in the form the game
+  wants (`\u00A7` colour codes and `\n` between the lines) and keeps a `.bak` copy; **Copy** gives you the `motd=` line instead.
+  **Load from server.properties** brings the current MOTD back in to edit.
+
+Restart the server after changing `server.properties`. Nothing in the Server tab changes a file until you press a Save button.
 
 ### Launcher and downloading missing mods
 
@@ -118,7 +111,7 @@ Forge, NeoForge, Fabric and Quilt formats; treat the result as a strong hint, no
 
 Click a problem and look at **Where this comes from**. It names the check that raised it, the jar, the metadata file
 inside it, and the exact entry (for example `mods/needs-lib.jar > fabric.mod.json > depends."cool-lib"`). Rule-based findings
-point at the entry in `rules.json`. Three buttons sit under every problem that has files:
+point at the matching entry in the built-in rules. Three buttons sit under every problem that has files:
 
 - **Show jar in folder** selects the jar in Explorer/Finder.
 - **View metadata files...** opens the raw `fabric.mod.json`, `mods.toml` and friends from inside the jar. A file the scanner
@@ -153,13 +146,6 @@ and quietly: no network is needed for anything else). If there is one it shows w
 Updates are only ever fetched from this project's own GitHub releases. The download is checked against the SHA-256 that GitHub
 publishes for the file, and a `.pyzw` must really be Modpack Doctor and contain exactly the version the release names.
 **Help > Check for updates...** checks right now, and **View > Check for updates on startup** turns the automatic check off.
-A copy run from the source folder cannot replace itself; it opens the release page instead.
-
-**For the maintainer:** `REPO` at the top of `modpack_doctor/updater.py` is the public downloads repository
-(`Darkmoon-Hollow-Development/Modpack-Doctor`), not the source repository; `MODPACK_DOCTOR_REPO` overrides it for testing.
-Releases there must carry `ModpackDoctor.pyzw` and `ModpackDoctor-Setup.exe`, and a tag that ends in the same number as
-`__version__` (`Release-5.1` for `5.1`). The release workflow in the source repository does all of this (see *For developers*).
-With `REPO` empty, update checks are switched off. **Help > Open downloads page** opens the releases list.
 
 ### Tabs and saved packs
 
@@ -189,22 +175,6 @@ to also look for newer builds and replacements online. The **Options** button ne
 
 ---
 
-## Command line
-
-```
-python -m modpack_doctor analyze <folder|.mrpack|.zip> [--format text|markdown|json] [--out report.md] [--online]
-python -m modpack_doctor fix <folder> [--yes]
-python -m modpack_doctor undo <folder>
-python -m modpack_doctor gui <folder> [<folder> ...]      # opens the app, one tab per pack
-```
-
-`analyze` exits with code 1 when errors are found, so it works in CI. Try it safely on a deliberately broken sample pack:
-
-```
-python tools/make_demo_pack.py demo-pack
-python -m modpack_doctor gui demo-pack
-```
-
 ## Safety
 
 - Mods are **never deleted**, only renamed to `.jar.disabled` (rename back to restore).
@@ -220,43 +190,15 @@ python -m modpack_doctor gui demo-pack
   CurseForge needs an API key and does not allow every mod to be downloaded by other tools.
 - Crash analysis only recognises the formats listed above; a crash with no named mod gets an honest "nothing points at a
   specific mod" rather than a guess.
-- Config checks are rule-based (syntax plus the value rules in `rules.json`) and do not understand every mod's settings.
+- Config checks are rule-based (syntax plus the built-in value rules) and do not understand every mod's settings.
 - The built-in known-conflict list is a starter set.
 
 ## Teach it more
 
-Compatibility knowledge lives in `modpack_doctor/data/rules.json` (known conflicts, redundant mods, recommended mods, config
-rules, RAM tiers). Add your own in a separate JSON file and pick it under *Extra rules file* in the app (or `--rules` on the
-command line). Its lists are added to the built-in ones. Pull requests that extend `rules.json` are welcome.
+Compatibility knowledge (known conflicts, redundant mods, recommended mods, config rules, RAM tiers) is built in. Add your own
+in a separate JSON file and pick it under *Extra rules file* in the app. Its lists are added to the built-in ones.
 
 ---
-
-## For developers
-
-**Build the single file yourself:** `python tools/build_single_file.py` writes `dist/ModpackDoctor.pyzw` (a standard-library zipapp).
-
-**Two repositories.** The source lives in `Modpack-Doctor-Files`. The public `Modpack-Doctor` repository holds only the readme
-and the **Releases** (the app checks it for updates). The *Release* workflow in the source repository builds the app and
-publishes the release to the public one.
-
-**One-time setup:** create a fine-grained personal access token with **Contents: Read and write** on the public
-`Modpack-Doctor` repository (GitHub > Settings > Developer settings > Personal access tokens), and save it in the source
-repository under *Settings > Secrets and variables > Actions* as **`RELEASES_TOKEN`**. (The built-in token cannot write to a
-second repository.) The public repository needs at least one commit, which the readme provides.
-
-**Publish a release:** bump the version in `modpack_doctor/__init__.py` and `pyproject.toml`, commit, then push a tag
-that ends in the same number, from the source repository: `git tag Release-5.1` and `git push origin Release-5.1`.
-The workflow runs the tests, builds `ModpackDoctor.pyzw` and `ModpackDoctor-Setup.exe`, and attaches them to a new release in
-the public repository. Put your release notes in a `RELEASE_NOTES.md` in the source repository before tagging (or edit the
-release text afterwards). You can also upload the two files to the public Releases page by hand.
-
-**Tests:** a second workflow runs the test suite on every push, on Linux and Windows.
-
-```
-python -m unittest discover -s tests            # engine tests; GUI tests are skipped without tkinter and a display
-xvfb-run python -m unittest discover -s tests   # Linux: include the GUI tests
-python tools/make_icon.py                       # redraws the app icon (needs Pillow)
-```
 
 ## License
 
