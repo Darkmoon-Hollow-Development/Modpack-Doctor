@@ -59,7 +59,7 @@ Forge, NeoForge, Fabric and Quilt formats; treat the result as a strong hint, no
 
 ### Running a server
 
-Open the server's own folder (the one with `server.properties`, `logs` and `mods`) and use the **Server** tab. It has three parts:
+The **Server** tab has four parts. Files, Logs and MOTD work on a server's own folder (the one with `server.properties`, `logs` and `mods`). **Server pack** works on your client modpack and is described in the next section.
 
 - **Files** lists the usual server files (settings, EULA, ops, whitelist, bans, world, icon, mods, configs, start scripts) with a
   note on anything wrong: an EULA that is not `true`, an empty whitelist while the whitelist is on, a server icon that is not
@@ -76,6 +76,26 @@ Open the server's own folder (the one with `server.properties`, `logs` and `mods
   **Load from server.properties** brings the current MOTD back in to edit.
 
 Restart the server after changing `server.properties`. Nothing in the Server tab changes a file until you press a Save button.
+
+### Making a server pack
+
+Open your client modpack's instance folder, press **Analyze**, then go to **Server > Server pack**. It builds a server version of the
+pack, much like ServerPackCreator:
+
+- It **leaves out client-side mods**: mods that say they are client-only, plus a short list of well-known ones (minimaps,
+  Sodium/Embeddium/Oculus, menu and sound mods). A client-side mod that another kept mod needs stays in. The table shows every mod and
+  why; double-click a row to keep or leave out any mod yourself.
+- It copies the **mods** and the `config`, `defaultconfigs`, `kubejs`, `scripts` and `global_packs` folders (and any extra folders you
+  list), but never your worlds, screenshots, options or saves.
+- It can add a **server.properties** with the MOTD from the MOTD page, a **64x64 server icon**, and **start scripts**
+  (`start.bat` and `start.sh`). On the first start the scripts download and install the right loader (Forge, NeoForge, Fabric or
+  Quilt) and then run the server with the memory you picked.
+- It writes a short `README.txt` (including the list of mods left out) and, if you want, a `.zip` that unpacks into one folder.
+
+Your pack is not changed. The **EULA is never accepted for you**: the server stops on its first start and creates `eula.txt`, and the
+README explains how to read it and set `eula=true` if you agree. Loader versions come from the scan; if the pack does not say, type
+the version into **Loader version** (for example Forge `47.2.0`, or leave Fabric blank for the newest). The loader is downloaded from the
+loader's own site when the server is first started, not when the pack is made.
 
 ### Launcher and downloading missing mods
 
