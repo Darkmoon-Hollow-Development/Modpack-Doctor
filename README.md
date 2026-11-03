@@ -63,12 +63,14 @@ The **Server** tab has four parts. Files, Logs and MOTD work on a server's own f
 
 - **Files** lists the usual server files (settings, EULA, ops, whitelist, bans, world, icon, mods, configs, start scripts) with a
   note on anything wrong: an EULA that is not `true`, an empty whitelist while the whitelist is on, a server icon that is not
-  64x64, crash reports waiting. Double-click a file to open it. **Edit server.properties...** lets you change settings in a
+  64x64, crash reports waiting. Double-click a file to open it. **Back up world** zips the world and its Nether and End folders
+  (plus the settings and player lists) into the server's `backups` folder; stop the server first for a clean copy. **Edit server.properties...** lets you change settings in a
   list, warns about risky ones (online-mode off, a very large view-distance, RCON with no password) and keeps a `.bak` copy.
+  **Quick settings** applies a set of values in one go (run smoother, private whitelisted server, safer defaults).
 - **Logs** reads `logs/latest.log` (or any `.log` / `.log.gz` you pick) and says whether the server started and how long it took,
   how often it fell behind, who joined, the most common errors, and the usual start-up failures: EULA not accepted, port already
   in use, the watchdog stopping a stuck tick, missing dependencies, a client-only mod on the server. Mods it can match to a jar get a
-  **Disable** button.
+  **Disable** button. **Copy summary** puts a short paste-ready version on the clipboard for help requests.
 - **MOTD** is a maker for the two lines players see in the server list. Type `&` colour codes or click the colours and
   Bold / Italic / Underline / Strike / Magic buttons, try the presets, centre a line, or give a line a gradient (Minecraft 1.16+).
   The preview shows how it will look and how wide each line is. **Save to server.properties** writes it in the form the game
@@ -91,6 +93,8 @@ pack, much like ServerPackCreator:
   (`start.bat` and `start.sh`). On the first start the scripts download and install the right loader (Forge, NeoForge, Fabric or
   Quilt) and then run the server with the memory you picked.
 - It writes a short `README.txt` (including the list of mods left out) and, if you want, a `.zip` that unpacks into one folder.
+- **Java flags...** fills in a ready-made set of memory-friendly garbage-collection flags. When the pack is made, **Check it when done**
+  scans the finished server pack as a server and tells you about missing dependencies or client-only mods that slipped through.
 
 Your pack is not changed. The **EULA is never accepted for you**: the server stops on its first start and creates `eula.txt`, and the
 README explains how to read it and set `eula=true` if you agree. Loader versions come from the scan; if the pack does not say, type
@@ -183,6 +187,8 @@ to also look for newer builds and replacements online. The **Options** button ne
 
 ### Handy extras
 
+- **Tools > Compare with another pack...** scans a second pack folder and lists the mods that were added, removed or changed
+  version compared with the pack you have open, plus any change of Minecraft version or loader. Copy it or save it as a text file.
 - **Copy support summary** (right panel, or *File*) puts a short paste-ready summary on the clipboard: pack, versions, health
   score and the worst problems. Good for Discord and forum help requests.
 - **Mods tab:** select a mod and click **Find online** to search for it on your launcher's site, or **Copy list** to put the
